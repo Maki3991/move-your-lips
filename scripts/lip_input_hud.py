@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import queue
 import threading
 import time
@@ -31,12 +32,13 @@ from typing import Any
 import cv2
 import numpy as np
 import pyperclip
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 from pynput import keyboard
 
 from lip_input_mvp import (
     CNVSRCRecognizer,
     DEFAULT_CHECKPOINT_NAME,
+    DEFAULT_BEAM_SIZE,
     DEFAULT_VSR_ROOT,
     PROJECT_ROOT,
     RealtimeLandmarker,
@@ -55,11 +57,12 @@ ACCENT = "#ff5473"
 GREEN = "#4dd98c"
 AMBER = "#ffb840"
 RED = "#ff6b5e"
-W, H = 520, 100
-READING_W, READING_H = 300, 64
-RESULT_MIN_W, RESULT_MAX_W = 260, W
+W, H = 420, 86
 VIDEO_W, VIDEO_H = 112, 70
+CORNER_RADIUS = 8
 SETUP_BG = "#201e23"
+CAMERA_IDLE_SECONDS = 45.0
+LIVE_PREVIEW_MAX_FRAMES = 150
 
 
 @dataclass
@@ -90,93 +93,119 @@ class Recording:
             return self.timestamps[-1] - self.timestamps[0]
 
 
-@dataclass
-class MouthCropTracker:
-    """Smooth the mouth crop center and scale for the live HUD preview."""
-
-    output_size: tuple[int, int] = (VIDEO_W, VIDEO_H)
-    center: np.ndarray | None = None
-    crop_size: np.ndarray | None = None
-
-    def reset(self) -> None:
-        self.center = None
-        self.crop_size = None
-
-    def update(
-        self,
-        points: np.ndarray,
-        frame_shape: tuple[int, ...],
-    ) -> tuple[int, int, int, int] | None:
-        if len(points) < 68:
-            return None
-
-        mouth = np.asarray(points[48:68], dtype=np.float32)
-        mouth_min = mouth.min(axis=0)
-        mouth_max = mouth.max(axis=0)
-        target_center = (mouth_min + mouth_max) / 2.0
-        mouth_width = max(1.0, float(mouth_max[0] - mouth_min[0]))
-
-        frame_height, frame_width = frame_shape[:2]
-        aspect = self.output_size[0] / self.output_size[1]
-        target_width = max(180.0, mouth_width * 3.0)
-        target_height = target_width / aspect
-
-        max_width = max(4.0, float(frame_width - 4))
-        max_height = max(4.0, float(frame_height - 4))
-        if target_width > max_width:
-            target_width = max_width
-            target_height = target_width / aspect
-        if target_height > max_height:
-            target_height = max_height
-            target_width = target_height * aspect
-
-        target_size = np.array([target_width, target_height], dtype=np.float32)
-        if self.center is None:
-            self.center = target_center
-        else:
-            # Follow movement while filtering small landmark jitter.
-            self.center = 0.35 * target_center + 0.65 * self.center
-
-        if self.crop_size is None:
-            self.crop_size = target_size
-        else:
-            # Scale changes move more slowly, keeping the mouth size stable.
-            self.crop_size = 0.15 * target_size + 0.85 * self.crop_size
-
-        crop_width = int(round(float(np.clip(self.crop_size[0], 4.0, max_width))))
-        crop_height = int(round(float(np.clip(self.crop_size[1], 4.0, max_height))))
-        x0 = int(round(float(self.center[0] - crop_width / 2)))
-        y0 = int(round(float(self.center[1] - crop_height / 2)))
-        x0 = max(0, min(x0, frame_width - crop_width))
-        y0 = max(0, min(y0, frame_height - crop_height))
-        return x0, y0, x0 + crop_width, y0 + crop_height
-
-
 def mouth_hud_view(
     frame_bgr: np.ndarray,
     points: np.ndarray | None,
-    tracker: "MouthCropTracker",
     size: tuple[int, int] = (VIDEO_W, VIDEO_H),
 ) -> np.ndarray | None:
-    """Create a stabilized mirrored mouth view with landmark dots."""
+    """Create Lipflow-style fixed-size, centered mouth preview.
+
+    Lipflow does not simply slice a rectangle from the source frame. It builds
+    an affine transform around the current lip center, warps the frame to the
+    HUD size, mirrors it, and then draws the transformed lip landmarks. The
+    border mode keeps the mouth centered even when the source crop reaches an
+    edge of the camera frame.
+    """
+    output_width, output_height = size
     if points is None or len(points) < 68:
-        return None
+        # Do not flash the entire camera view before the first landmarks are
+        # ready.  A neutral placeholder keeps the user's surroundings out of
+        # the HUD while detection is warming up.
+        view = np.full(
+            (output_height, output_width, 3),
+            (28, 27, 30),
+            dtype=np.uint8,
+        )
+        cv2.putText(
+            view,
+            "TRACKING...",
+            (4, output_height - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.28,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA,
+        )
+        return view
 
-    mouth = np.asarray(points[48:68], dtype=np.float32)
-    box = tracker.update(points, frame_bgr.shape)
-    if box is None:
-        return None
-    x0, y0, x1, y1 = box
+    outer_lips = np.asarray(points[48:60], dtype=np.float32)
+    inner_lips = np.asarray(points[60:68], dtype=np.float32)
+    lips = np.asarray(points[48:68], dtype=np.float32)
+    center_x, center_y = lips.mean(axis=0)
+    half_width = max(float(np.ptp(lips[:, 0])), 10.0) * 0.9
+    half_height = half_width * output_height / output_width
+    x0 = center_x - half_width
+    y0 = center_y - half_height
+    scale = output_width / (2.0 * half_width)
+    matrix = np.float32(
+        [[scale, 0.0, -x0 * scale], [0.0, scale, -y0 * scale]]
+    )
 
-    crop = frame_bgr[y0:y1, x0:x1].copy()
-    local = np.round(mouth - np.array([x0, y0], dtype=np.float32)).astype(np.int32)
-    local[:, 0] = np.clip(local[:, 0], 0, crop.shape[1] - 1)
-    local[:, 1] = np.clip(local[:, 1], 0, crop.shape[0] - 1)
-    cv2.polylines(crop, [local], isClosed=True, color=(100, 70, 255), thickness=2)
-    for point in local:
-        cv2.circle(crop, tuple(point), 2, (100, 70, 255), -1)
-    crop = cv2.flip(crop, 1)
-    return cv2.resize(crop, size, interpolation=cv2.INTER_AREA)
+    view = cv2.warpAffine(
+        frame_bgr,
+        matrix,
+        (output_width, output_height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
+    view = cv2.flip(view, 1)
+
+    def to_view(landmarks: np.ndarray) -> np.ndarray:
+        transformed = (landmarks - np.array([x0, y0], dtype=np.float32)) * scale
+        transformed[:, 0] = output_width - 1 - transformed[:, 0]
+        return transformed
+
+    overlay = view.copy()
+    for contour in (outer_lips, inner_lips):
+        contour_view = np.round(to_view(contour)).astype(np.int32)
+        cv2.polylines(
+            overlay,
+            [contour_view],
+            isClosed=True,
+            color=(170, 150, 255),
+            thickness=1,
+            lineType=cv2.LINE_AA,
+        )
+    view = cv2.addWeighted(overlay, 0.7, view, 0.3, 0)
+    for x, y in to_view(lips):
+        cv2.circle(
+            view,
+            (int(round(x)), int(round(y))),
+            2,
+            (115, 92, 250),
+            -1,
+            cv2.LINE_AA,
+        )
+    return view
+
+
+def rounded_rect_points(
+    width: int,
+    height: int,
+    radius: int,
+    segments: int = 8,
+) -> list[float]:
+    """Return a rounded-rectangle outline without global path smoothing."""
+
+    x0, y0, x1, y1 = 2, 2, width - 2, height - 2
+    radius = min(radius, (x1 - x0) // 2, (y1 - y0) // 2)
+    corners = (
+        (x1 - radius, y0 + radius, -90, 0),
+        (x1 - radius, y1 - radius, 0, 90),
+        (x0 + radius, y1 - radius, 90, 180),
+        (x0 + radius, y0 + radius, 180, 270),
+    )
+    points: list[float] = []
+    for center_x, center_y, start, end in corners:
+        for index in range(segments + 1):
+            angle = math.radians(start + (end - start) * index / segments)
+            points.extend(
+                (
+                    center_x + radius * math.cos(angle),
+                    center_y + radius * math.sin(angle),
+                )
+            )
+    return points
 
 
 class HUD:
@@ -211,19 +240,22 @@ class HUD:
             highlightthickness=0,
         )
         canvas.pack()
+        # Keep this on the Canvas for now.  The previous RGBA downsampling
+        # approach created a magenta halo when combined with Tk's transparent
+        # color.  The geometric path keeps the straight edges intact.
         self.background = canvas.create_polygon(
-            self._background_points(),
-            smooth=True,
+            rounded_rect_points(self.width, self.height, CORNER_RADIUS),
+            smooth=False,
             fill=BG,
-            outline="#3a3640",
+            outline="",
         )
         self.canvas = canvas
         self.title_font = tkfont.Font(root=root, family="Segoe UI", size=9, weight="bold")
-        self.body_font = tkfont.Font(root=root, family="Segoe UI", size=13)
-        self.dot = canvas.create_oval(24, 25, 36, 37, fill=AMBER, outline="")
-        self.video_item = canvas.create_image(96, H // 2, state="hidden")
-        self.title = canvas.create_text(52, 30, anchor="w", fill=DIM, font=self.title_font)
-        self.body = canvas.create_text(52, 65, anchor="w", fill=FG, font=self.body_font, width=W - 80)
+        self.body_font = tkfont.Font(root=root, family="Segoe UI", size=12)
+        self.dot = canvas.create_oval(22, 22, 32, 32, fill=AMBER, outline="")
+        self.video_item = canvas.create_image(18 + VIDEO_W // 2, H // 2, state="hidden")
+        self.title = canvas.create_text(42, 27, anchor="w", fill=DIM, font=self.title_font)
+        self.body = canvas.create_text(22, 54, anchor="w", fill=FG, font=self.body_font, width=W - 44)
         self._image: ImageTk.PhotoImage | None = None
         self.mode = ""
         self.body_text = ""
@@ -245,64 +277,11 @@ class HUD:
             # is unavailable.
             pass
 
-    def _background_points(self) -> list[int]:
-        inset = 2
-        radius = min(28, max(16, self.height // 3))
-        return [
-            radius,
-            inset,
-            self.width - radius,
-            inset,
-            self.width - inset,
-            radius,
-            self.width - inset,
-            self.height - radius,
-            self.width - radius,
-            self.height - inset,
-            radius,
-            self.height - inset,
-            inset,
-            self.height - radius,
-            inset,
-            radius,
-        ]
-
-    def _set_dimensions(self, width: int, height: int) -> None:
-        if self.width == width and self.height == height:
-            return
-        self.width = width
-        self.height = height
-        self.canvas.configure(width=width, height=height)
-        self.canvas.coords(self.background, *self._background_points())
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.win.geometry(f"{width}x{height}+{(sw - width) // 2}+{sh - height - 96}")
-
-    def _display_text(self, body: str) -> str:
-        limit = 36 if self.canvas.itemcget(self.video_item, "state") != "hidden" else 58
-        if len(body) <= limit:
-            return body
-        return "…" + body[-limit:]
-
-    def _result_width(self, body: str) -> int:
-        shown = body if len(body) <= 58 else "…" + body[-58:]
-        text_width = max(
-            self.title_font.measure("COPIED"),
-            self.title_font.measure("PASTED"),
-            self.body_font.measure(shown),
-        )
-        return min(RESULT_MAX_W, max(RESULT_MIN_W, text_width + 52 + 24))
-
     def show(self, mode: str, title: str, body: str = "", hide_after: float | None = None) -> None:
         if self._hide_job is not None:
             self.root.after_cancel(self._hide_job)
             self._hide_job = None
         self.mode = mode
-        if mode == "reading":
-            self._set_dimensions(READING_W, READING_H)
-        elif mode == "done" and title.upper() in {"COPIED", "PASTED"}:
-            self._set_dimensions(self._result_width(body), H)
-        else:
-            self._set_dimensions(W, H)
         self.canvas.itemconfigure(self.dot, fill=self.STATES.get(mode, AMBER))
         self.canvas.itemconfigure(self.title, text=title.upper())
         if mode != "listening":
@@ -318,14 +297,56 @@ class HUD:
         if image_bgr is None or self.mode != "listening":
             return
         rgb = np.ascontiguousarray(image_bgr[:, :, ::-1])
-        self._image = ImageTk.PhotoImage(Image.fromarray(rgb))
+        image = Image.fromarray(rgb).convert("RGB")
+        mask_scale = 4
+        large_mask = Image.new(
+            "L",
+            (image.width * mask_scale, image.height * mask_scale),
+            0,
+        )
+        ImageDraw.Draw(large_mask).rounded_rectangle(
+            (0, 0, image.width * mask_scale - 1, image.height * mask_scale - 1),
+            radius=min(
+                CORNER_RADIUS * mask_scale,
+                image.width * mask_scale // 2,
+                image.height * mask_scale // 2,
+            ),
+            fill=255,
+        )
+        mask = large_mask.resize(image.size, Image.Resampling.LANCZOS)
+        background = Image.new("RGB", image.size, BG)
+        image = Image.composite(image, background, mask)
+        self._image = ImageTk.PhotoImage(image)
         self.canvas.itemconfigure(self.video_item, image=self._image, state="normal")
         self._layout(True)
 
+    def _fit_single_line(self, body: str, max_width: int) -> str:
+        """Fit final output on one line and put the ellipsis at the end."""
+
+        body = " ".join(body.replace("\r", "").split("\n")).strip()
+        if self.body_font.measure(body) <= max_width:
+            return body
+
+        ellipsis = "..."
+        available = max(1, max_width - self.body_font.measure(ellipsis))
+        low, high = 0, len(body)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if self.body_font.measure(body[:middle]) <= available:
+                low = middle
+            else:
+                high = middle - 1
+        return body[:low] + ellipsis
+
     def set_text(self, body: str) -> None:
         self.body_text = body
-        limit = 36 if self.canvas.itemcget(self.video_item, "state") != "hidden" else 58
-        shown = body if len(body) <= limit else "…" + body[-limit:]
+        live_preview = self.canvas.itemcget(self.video_item, "state") != "hidden"
+        if self.mode == "done":
+            x = 18 + VIDEO_W + 14 if live_preview else 22
+            shown = self._fit_single_line(body, W - x - 22)
+        else:
+            limit = 34 if live_preview else 46
+            shown = body if len(body) <= limit else "..." + body[-limit:]
         self.canvas.itemconfigure(self.body, text=shown)
 
     def hide(self) -> None:
@@ -342,18 +363,14 @@ class HUD:
 
     def _layout(self, video: bool) -> None:
         if video:
-            x = 164
-            self.canvas.coords(self.video_item, 96, self.height // 2)
+            x = 18 + VIDEO_W + 14
+            self.canvas.coords(self.video_item, 18 + VIDEO_W // 2, H // 2)
         else:
-            x = 52
-        if self.mode == "reading":
-            dot_y, title_y, body_y = 15, 21, 45
-        else:
-            dot_y, title_y, body_y = 25, 30, 65
-        self.canvas.coords(self.dot, x - 28, dot_y, x - 16, dot_y + 12)
-        self.canvas.coords(self.title, x, title_y)
-        self.canvas.coords(self.body, x, body_y)
-        self.canvas.itemconfigure(self.body, width=self.width - x - 24)
+            x = 22
+        self.canvas.coords(self.dot, x, 22, x + 10, 32)
+        self.canvas.coords(self.title, x + 20, 27)
+        self.canvas.coords(self.body, x, 54)
+        self.canvas.itemconfigure(self.body, width=W - x - 22)
 
 
 class CameraWorker:
@@ -367,6 +384,7 @@ class CameraWorker:
         on_frame,
         on_error,
         detect_interval: float,
+        idle_close: float = CAMERA_IDLE_SECONDS,
     ) -> None:
         self.camera_index = camera_index
         self.landmarker = landmarker
@@ -374,10 +392,12 @@ class CameraWorker:
         self.on_frame = on_frame
         self.on_error = on_error
         self.detect_interval = detect_interval
+        self.idle_close = idle_close
         self._lock = threading.Lock()
         self._rec: Recording | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._last_used = time.perf_counter()
 
     @property
     def recording(self) -> Recording | None:
@@ -391,16 +411,20 @@ class CameraWorker:
             self._stop.clear()
             self._rec = Recording(started=time.perf_counter())
             rec = self._rec
-            self._thread = threading.Thread(target=self._run, name="move-your-lips-camera", daemon=True)
-            self._thread.start()
+            self._last_used = time.perf_counter()
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(
+                    target=self._run,
+                    name="move-your-lips-camera",
+                    daemon=True,
+                )
+                self._thread.start()
             return rec
 
     def stop_recording(self) -> Recording | None:
         with self._lock:
             rec, self._rec = self._rec, None
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._last_used = time.perf_counter()
         return rec
 
     def cancel(self) -> None:
@@ -409,6 +433,16 @@ class CameraWorker:
             rec.frames_rgb.clear()
             rec.landmarks.clear()
             rec.timestamps.clear()
+        self.close()
+
+    def close(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
+        with self._lock:
+            if self._thread is thread and (thread is None or not thread.is_alive()):
+                self._thread = None
 
     def _run(self) -> None:
         cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
@@ -422,30 +456,48 @@ class CameraWorker:
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         cap.set(cv2.CAP_PROP_FPS, 30)
 
-        detection_future: Future | None = None
+        detection_future: tuple[Recording, Future] | None = None
         tracked_points: np.ndarray | None = None
         last_detect = 0.0
+        last_rec: Recording | None = None
         try:
             while not self._stop.is_set():
                 ok, frame_bgr = cap.read()
                 if not ok:
-                    self.on_error("CAMERA READ ERROR - try again")
+                    if self.recording is not None:
+                        self.on_error("CAMERA READ ERROR - try again")
                     break
                 now = time.perf_counter()
                 rec = self.recording
                 if rec is None:
-                    break
+                    if now - self._last_used >= self.idle_close:
+                        break
+                    # Keep the capture warm for the next key press, but do
+                    # not run detection or expose frames in the HUD.
+                    continue
 
-                if detection_future is not None and detection_future.done():
+                if rec is not last_rec:
+                    last_rec = rec
+                    tracked_points = None
+                    last_detect = 0.0
+
+                if detection_future is not None and detection_future[1].done():
+                    detected_rec, future = detection_future
                     try:
-                        _face, tracked_points = detection_future.result()
+                        _face, points = future.result()
+                        if detected_rec is rec:
+                            tracked_points = points
                     except Exception:
-                        tracked_points = None
+                        if detected_rec is rec:
+                            tracked_points = None
                     detection_future = None
 
                 if detection_future is None and now - last_detect >= self.detect_interval:
-                    detection_future = self.detector_executor.submit(
-                        self.landmarker.detect, frame_bgr.copy()
+                    detection_future = (
+                        rec,
+                        self.detector_executor.submit(
+                            self.landmarker.detect, frame_bgr.copy()
+                        ),
                     )
                     last_detect = now
 
@@ -454,10 +506,12 @@ class CameraWorker:
         finally:
             cap.release()
             with self._lock:
-                if self._rec is not None and self._stop.is_set():
-                    # stop_recording normally clears this first; this branch
-                    # prevents a stale recording from surviving a camera error.
+                if self._rec is not None:
+                    # A camera error must not leave the UI waiting on a stale
+                    # recording that can never receive more frames.
                     self._rec = None
+                if self._thread is threading.current_thread():
+                    self._thread = None
 
 
 class HudApp:
@@ -487,7 +541,6 @@ class HudApp:
         self.exit_requested = False
         self._frame_lock = threading.Lock()
         self._latest_frame: np.ndarray | None = None
-        self.mouth_tracker = MouthCropTracker()
         self.root.bind("<Escape>", lambda _event: self.cancel_or_quit())
 
     def run(self) -> None:
@@ -522,7 +575,13 @@ class HudApp:
             vsr_root = self.args.vsr_root.resolve()
             checkpoint = self.args.checkpoint or (vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME)
             self.args.checkpoint = checkpoint
-            self.recognizer = CNVSRCRecognizer(vsr_root, checkpoint, device=self.args.device)
+            self.recognizer = CNVSRCRecognizer(
+                vsr_root,
+                checkpoint,
+                device=self.args.device,
+                beam_size=self.args.beam_size,
+            )
+            self.recognizer.warmup()
             self.landmarker = RealtimeLandmarker(vsr_root, self.args.face_model)
             self.root.after(0, self._models_ready)
         except Exception as exc:
@@ -615,7 +674,6 @@ class HudApp:
         if self.recognizer is None or self.camera is None:
             return
         self.session += 1
-        self.mouth_tracker.reset()
         self.active_rec = self.camera.start_recording()
         self.mode = "listening"
         self.tailing = False
@@ -667,6 +725,10 @@ class HudApp:
         if self.preview_future is None:
             frames, points, timestamps = self.active_rec.snapshot()
             if len(frames) >= 16 and self.recognizer is not None:
+                if len(frames) > LIVE_PREVIEW_MAX_FRAMES:
+                    frames = frames[-LIVE_PREVIEW_MAX_FRAMES:]
+                    points = points[-LIVE_PREVIEW_MAX_FRAMES:]
+                    timestamps = timestamps[-LIVE_PREVIEW_MAX_FRAMES:]
                 session = self.session
                 self.preview_future = (
                     session,
@@ -733,7 +795,7 @@ class HudApp:
             self.root.after(50, self._poll_futures)
 
     def _camera_frame(self, frame_bgr: np.ndarray, points: np.ndarray | None) -> None:
-        view = mouth_hud_view(frame_bgr, points, self.mouth_tracker)
+        view = mouth_hud_view(frame_bgr, points)
         if view is None:
             return
         try:
@@ -812,6 +874,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--face-model", choices=["mobilenet0.25", "resnet50"], default="mobilenet0.25")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument(
+        "--beam-size",
+        type=int,
+        default=DEFAULT_BEAM_SIZE,
+        help="Final decoder beam size; higher may improve search but is slower",
+    )
     parser.add_argument("--preview-interval", type=float, default=0.45)
     parser.add_argument("--tail-seconds", type=float, default=0.4)
     parser.add_argument("--detect-interval", type=float, default=0.25)
@@ -840,7 +908,12 @@ def main() -> int:
 
     if args.self_test:
         print("[mvp-hud] loading CNVSRC2025 model...")
-        reader = CNVSRCRecognizer(vsr_root, checkpoint, device=args.device)
+        reader = CNVSRCRecognizer(
+            vsr_root,
+            checkpoint,
+            device=args.device,
+            beam_size=args.beam_size,
+        )
         print(f"[mvp-hud] model ready: {checkpoint}")
         print("[mvp-hud] self-test passed")
         return 0

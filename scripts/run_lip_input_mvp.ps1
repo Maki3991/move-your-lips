@@ -21,4 +21,5 @@ Set-Location -LiteralPath $project
     --checkpoint $checkpoint `
     --camera 0 `
     --face-model mobilenet0.25 `
-    --device cpu
+    --device cpu `
+    --beam-size 10

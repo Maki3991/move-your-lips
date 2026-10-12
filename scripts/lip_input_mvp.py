@@ -39,6 +39,7 @@ DEFAULT_VSR_ROOT = Path(
     r"D:\Softwares\Programming Projects\_githubs\CNVSRC2025\VSR"
 )
 DEFAULT_CHECKPOINT_NAME = "model_avg_cncvs_2_3_cnvsrc.pth"
+DEFAULT_BEAM_SIZE = 10
 FONT_CANDIDATES = (
     Path(r"C:\Windows\Fonts\msyh.ttc"),
     Path(r"C:\Windows\Fonts\simhei.ttf"),
@@ -139,11 +140,16 @@ class CNVSRCRecognizer:
     """Load the existing CNVSRC2025 visual model and decode mouth crops."""
 
     def __init__(
-        self, vsr_root: Path, checkpoint: Path, device: str = "cpu"
+        self,
+        vsr_root: Path,
+        checkpoint: Path,
+        device: str = "cpu",
+        beam_size: int = DEFAULT_BEAM_SIZE,
     ) -> None:
         self.vsr_root = vsr_root.resolve()
         self.checkpoint = checkpoint.resolve()
         self.device = torch.device(device)
+        self.beam_size = max(1, int(beam_size))
         sys.path.insert(0, str(self.vsr_root))
 
         from omegaconf import OmegaConf
@@ -173,13 +179,34 @@ class CNVSRCRecognizer:
             self.model,
             self.token_list,
             ctc_weight=0.3,
-            beam_size=40,
+            beam_size=self.beam_size,
         )
         self.beam_search.to(self.device).eval()
         self.video_transform = VideoTransform("test")
         from preparation.video_process import VideoProcess
 
         self.video_process = VideoProcess(convert_gray=False, window_margin=1)
+
+    def warmup(self) -> None:
+        """Run one small inference before the first user recording.
+
+        PyTorch and the ESPnet decoder otherwise pay their first-call setup
+        cost during the first ``Reading your lips`` state.
+        """
+        dummy = np.zeros((25, 96, 96, 3), dtype=np.uint8)
+        encoded = self._encode(dummy)
+        with torch.inference_mode():
+            self._greedy_text(encoded)
+            self._reset_beam_cache()
+            self.beam_search(encoded)
+
+    def _reset_beam_cache(self) -> None:
+        decoder = self.beam_search.full_scorers.get("decoder")
+        if decoder is None:
+            return
+        for module in decoder.modules():
+            if hasattr(module, "_mem_kv"):
+                del module._mem_kv
 
     def prepare_rois(
         self,
@@ -235,6 +262,7 @@ class CNVSRCRecognizer:
             if greedy:
                 text = self._greedy_text(encoded)
             else:
+                self._reset_beam_cache()
                 hypotheses = self.beam_search(encoded)
                 best = hypotheses[0]
                 from espnet.asr.asr_utils import add_results_to_json
@@ -440,6 +468,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--face-model", choices=["mobilenet0.25", "resnet50"], default="mobilenet0.25")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument(
+        "--beam-size",
+        type=int,
+        default=DEFAULT_BEAM_SIZE,
+        help="Final decoder beam size; higher may improve search but is slower",
+    )
+    parser.add_argument(
         "--preview-interval",
         type=float,
         default=0.45,
@@ -510,7 +544,12 @@ def main() -> int:
         raise RuntimeError("CUDA was requested but is not available in this environment")
 
     print("[mvp] loading CNVSRC2025 model...")
-    recognizer = CNVSRCRecognizer(vsr_root, checkpoint, device=args.device)
+    recognizer = CNVSRCRecognizer(
+        vsr_root,
+        checkpoint,
+        device=args.device,
+        beam_size=args.beam_size,
+    )
     print(f"[mvp] model ready: {checkpoint}")
     if args.self_test:
         print("[mvp] self-test passed")
