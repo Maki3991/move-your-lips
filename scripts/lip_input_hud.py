@@ -6,7 +6,7 @@ only changes the product shell:
 * no large OpenCV camera window;
 * a hidden resident process with a small bottom-center HUD;
 * a background camera thread;
-* a short tail after Right Ctrl is released;
+* a short tail after F9 is released;
 * live greedy preview and final beam-search recognition stay separate.
 
 The default output is still clipboard-only.  ``--paste`` is intentionally an
@@ -22,6 +22,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+from tkinter import font as tkfont
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,13 +56,15 @@ GREEN = "#4dd98c"
 AMBER = "#ffb840"
 RED = "#ff6b5e"
 W, H = 520, 100
+READING_W, READING_H = 300, 64
+RESULT_MIN_W, RESULT_MAX_W = 260, W
 VIDEO_W, VIDEO_H = 112, 70
 SETUP_BG = "#201e23"
 
 
 @dataclass
 class Recording:
-    """Thread-safe frames captured for one Right Ctrl session."""
+    """Thread-safe frames captured for one F9 session."""
 
     started: float
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -87,29 +90,88 @@ class Recording:
             return self.timestamps[-1] - self.timestamps[0]
 
 
+@dataclass
+class MouthCropTracker:
+    """Smooth the mouth crop center and scale for the live HUD preview."""
+
+    output_size: tuple[int, int] = (VIDEO_W, VIDEO_H)
+    center: np.ndarray | None = None
+    crop_size: np.ndarray | None = None
+
+    def reset(self) -> None:
+        self.center = None
+        self.crop_size = None
+
+    def update(
+        self,
+        points: np.ndarray,
+        frame_shape: tuple[int, ...],
+    ) -> tuple[int, int, int, int] | None:
+        if len(points) < 68:
+            return None
+
+        mouth = np.asarray(points[48:68], dtype=np.float32)
+        mouth_min = mouth.min(axis=0)
+        mouth_max = mouth.max(axis=0)
+        target_center = (mouth_min + mouth_max) / 2.0
+        mouth_width = max(1.0, float(mouth_max[0] - mouth_min[0]))
+
+        frame_height, frame_width = frame_shape[:2]
+        aspect = self.output_size[0] / self.output_size[1]
+        target_width = max(180.0, mouth_width * 3.0)
+        target_height = target_width / aspect
+
+        max_width = max(4.0, float(frame_width - 4))
+        max_height = max(4.0, float(frame_height - 4))
+        if target_width > max_width:
+            target_width = max_width
+            target_height = target_width / aspect
+        if target_height > max_height:
+            target_height = max_height
+            target_width = target_height * aspect
+
+        target_size = np.array([target_width, target_height], dtype=np.float32)
+        if self.center is None:
+            self.center = target_center
+        else:
+            # Follow movement while filtering small landmark jitter.
+            self.center = 0.35 * target_center + 0.65 * self.center
+
+        if self.crop_size is None:
+            self.crop_size = target_size
+        else:
+            # Scale changes move more slowly, keeping the mouth size stable.
+            self.crop_size = 0.15 * target_size + 0.85 * self.crop_size
+
+        crop_width = int(round(float(np.clip(self.crop_size[0], 4.0, max_width))))
+        crop_height = int(round(float(np.clip(self.crop_size[1], 4.0, max_height))))
+        x0 = int(round(float(self.center[0] - crop_width / 2)))
+        y0 = int(round(float(self.center[1] - crop_height / 2)))
+        x0 = max(0, min(x0, frame_width - crop_width))
+        y0 = max(0, min(y0, frame_height - crop_height))
+        return x0, y0, x0 + crop_width, y0 + crop_height
+
+
 def mouth_hud_view(
     frame_bgr: np.ndarray,
     points: np.ndarray | None,
+    tracker: "MouthCropTracker",
     size: tuple[int, int] = (VIDEO_W, VIDEO_H),
 ) -> np.ndarray | None:
-    """Create a small mirrored colour mouth view with landmark dots."""
+    """Create a stabilized mirrored mouth view with landmark dots."""
     if points is None or len(points) < 68:
         return None
+
     mouth = np.asarray(points[48:68], dtype=np.float32)
-    x0, y0 = np.floor(mouth.min(axis=0)).astype(int)
-    x1, y1 = np.ceil(mouth.max(axis=0)).astype(int)
-    mouth_width = max(1, x1 - x0)
-    mouth_height = max(1, y1 - y0)
-    pad_x = max(28, int(mouth_width * 0.85))
-    pad_y = max(30, int(mouth_height * 1.25))
-    height, width = frame_bgr.shape[:2]
-    x0, x1 = max(0, x0 - pad_x), min(width, x1 + pad_x)
-    y0, y1 = max(0, y0 - pad_y), min(height, y1 + pad_y)
-    if x1 <= x0 or y1 <= y0:
+    box = tracker.update(points, frame_bgr.shape)
+    if box is None:
         return None
+    x0, y0, x1, y1 = box
 
     crop = frame_bgr[y0:y1, x0:x1].copy()
     local = np.round(mouth - np.array([x0, y0], dtype=np.float32)).astype(np.int32)
+    local[:, 0] = np.clip(local[:, 0], 0, crop.shape[1] - 1)
+    local[:, 1] = np.clip(local[:, 1], 0, crop.shape[0] - 1)
     cv2.polylines(crop, [local], isClosed=True, color=(100, 70, 255), thickness=2)
     for point in local:
         cv2.circle(crop, tuple(point), 2, (100, 70, 255), -1)
@@ -136,23 +198,32 @@ class HUD:
         self.win.attributes("-topmost", True)
         self.win.configure(bg=TRANSPARENT)
         self.win.attributes("-transparentcolor", TRANSPARENT)
+        self.width = W
+        self.height = H
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        self.win.geometry(f"{W}x{H}+{(sw - W) // 2}+{sh - H - 96}")
+        self.win.geometry(f"{self.width}x{self.height}+{(sw - self.width) // 2}+{sh - self.height - 96}")
 
-        canvas = tk.Canvas(self.win, width=W, height=H, bg=TRANSPARENT, highlightthickness=0)
+        canvas = tk.Canvas(
+            self.win,
+            width=self.width,
+            height=self.height,
+            bg=TRANSPARENT,
+            highlightthickness=0,
+        )
         canvas.pack()
-        canvas.create_polygon(
-            [28, 2, W - 28, 2, W - 2, 28, W - 2, H - 28, W - 28, H - 2,
-             28, H - 2, 2, H - 28, 2, 28],
+        self.background = canvas.create_polygon(
+            self._background_points(),
             smooth=True,
             fill=BG,
             outline="#3a3640",
         )
         self.canvas = canvas
+        self.title_font = tkfont.Font(root=root, family="Segoe UI", size=9, weight="bold")
+        self.body_font = tkfont.Font(root=root, family="Segoe UI", size=13)
         self.dot = canvas.create_oval(24, 25, 36, 37, fill=AMBER, outline="")
         self.video_item = canvas.create_image(96, H // 2, state="hidden")
-        self.title = canvas.create_text(52, 30, anchor="w", fill=DIM, font=("Segoe UI", 9, "bold"))
-        self.body = canvas.create_text(52, 65, anchor="w", fill=FG, font=("Segoe UI", 13), width=W - 80)
+        self.title = canvas.create_text(52, 30, anchor="w", fill=DIM, font=self.title_font)
+        self.body = canvas.create_text(52, 65, anchor="w", fill=FG, font=self.body_font, width=W - 80)
         self._image: ImageTk.PhotoImage | None = None
         self.mode = ""
         self.body_text = ""
@@ -174,11 +245,64 @@ class HUD:
             # is unavailable.
             pass
 
+    def _background_points(self) -> list[int]:
+        inset = 2
+        radius = min(28, max(16, self.height // 3))
+        return [
+            radius,
+            inset,
+            self.width - radius,
+            inset,
+            self.width - inset,
+            radius,
+            self.width - inset,
+            self.height - radius,
+            self.width - radius,
+            self.height - inset,
+            radius,
+            self.height - inset,
+            inset,
+            self.height - radius,
+            inset,
+            radius,
+        ]
+
+    def _set_dimensions(self, width: int, height: int) -> None:
+        if self.width == width and self.height == height:
+            return
+        self.width = width
+        self.height = height
+        self.canvas.configure(width=width, height=height)
+        self.canvas.coords(self.background, *self._background_points())
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.win.geometry(f"{width}x{height}+{(sw - width) // 2}+{sh - height - 96}")
+
+    def _display_text(self, body: str) -> str:
+        limit = 36 if self.canvas.itemcget(self.video_item, "state") != "hidden" else 58
+        if len(body) <= limit:
+            return body
+        return "…" + body[-limit:]
+
+    def _result_width(self, body: str) -> int:
+        shown = body if len(body) <= 58 else "…" + body[-58:]
+        text_width = max(
+            self.title_font.measure("COPIED"),
+            self.title_font.measure("PASTED"),
+            self.body_font.measure(shown),
+        )
+        return min(RESULT_MAX_W, max(RESULT_MIN_W, text_width + 52 + 24))
+
     def show(self, mode: str, title: str, body: str = "", hide_after: float | None = None) -> None:
         if self._hide_job is not None:
             self.root.after_cancel(self._hide_job)
             self._hide_job = None
         self.mode = mode
+        if mode == "reading":
+            self._set_dimensions(READING_W, READING_H)
+        elif mode == "done" and title.upper() in {"COPIED", "PASTED"}:
+            self._set_dimensions(self._result_width(body), H)
+        else:
+            self._set_dimensions(W, H)
         self.canvas.itemconfigure(self.dot, fill=self.STATES.get(mode, AMBER))
         self.canvas.itemconfigure(self.title, text=title.upper())
         if mode != "listening":
@@ -219,13 +343,17 @@ class HUD:
     def _layout(self, video: bool) -> None:
         if video:
             x = 164
-            self.canvas.coords(self.video_item, 96, H // 2)
+            self.canvas.coords(self.video_item, 96, self.height // 2)
         else:
             x = 52
-        self.canvas.coords(self.dot, x - 28, 25, x - 16, 37)
-        self.canvas.coords(self.title, x, 30)
-        self.canvas.coords(self.body, x, 65)
-        self.canvas.itemconfigure(self.body, width=W - x - 24)
+        if self.mode == "reading":
+            dot_y, title_y, body_y = 15, 21, 45
+        else:
+            dot_y, title_y, body_y = 25, 30, 65
+        self.canvas.coords(self.dot, x - 28, dot_y, x - 16, dot_y + 12)
+        self.canvas.coords(self.title, x, title_y)
+        self.canvas.coords(self.body, x, body_y)
+        self.canvas.itemconfigure(self.body, width=self.width - x - 24)
 
 
 class CameraWorker:
@@ -359,6 +487,7 @@ class HudApp:
         self.exit_requested = False
         self._frame_lock = threading.Lock()
         self._latest_frame: np.ndarray | None = None
+        self.mouth_tracker = MouthCropTracker()
         self.root.bind("<Escape>", lambda _event: self.cancel_or_quit())
 
     def run(self) -> None:
@@ -379,12 +508,12 @@ class HudApp:
     def _key_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         if key == keyboard.Key.esc:
             self.root.after(0, self.cancel_or_quit)
-        elif key == keyboard.Key.ctrl_r and not self.key_down:
+        elif key == keyboard.Key.f9 and not self.key_down:
             self.key_down = True
             self.root.after(0, self.begin_recording)
 
     def _key_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        if key == keyboard.Key.ctrl_r and self.key_down:
+        if key == keyboard.Key.f9 and self.key_down:
             self.key_down = False
             self.root.after(0, self.begin_tail)
 
@@ -412,7 +541,7 @@ class HudApp:
             self.args.detect_interval,
         )
         self.mode = "ready"
-        self.hud.show("done", "Ready", "Hold Right Ctrl and mouth your words", hide_after=2.5)
+        self.hud.show("done", "Ready", "Hold F9 and mouth your words", hide_after=2.5)
         if not self.setup_path.exists():
             self.root.after(250, self.show_setup)
 
@@ -434,7 +563,7 @@ class HudApp:
                  font=("Segoe UI", 16, "bold")).pack()
         tk.Label(
             win,
-            text="首次使用先确认交互方式：按住右 Ctrl，无声地做出说话动作，\n松开后识别结果会复制到剪贴板。",
+            text="首次使用先确认交互方式：按住 F9，无声地做出说话动作，\n松开后识别结果会复制到剪贴板。",
             bg=SETUP_BG,
             fg=DIM,
             justify="center",
@@ -442,7 +571,7 @@ class HudApp:
         ).pack(pady=(28, 16))
         tk.Label(
             win,
-            text="视频只在你按住右 Ctrl 时采集，并保留在本机。\n当前版本先完成基础闭环，个性化模型训练尚未接入。",
+            text="视频只在你按住 F9 时采集，并保留在本机。\n当前版本先完成基础闭环，个性化模型训练尚未接入。",
             bg=SETUP_BG,
             fg=DIM,
             justify="center",
@@ -478,7 +607,7 @@ class HudApp:
         if self.setup_window is not None:
             self.setup_window.destroy()
             self.setup_window = None
-        self.hud.show("done", "Ready", "Hold Right Ctrl and mouth your words", hide_after=2.5)
+        self.hud.show("done", "Ready", "Hold F9 and mouth your words", hide_after=2.5)
 
     def begin_recording(self) -> None:
         if self.mode not in ("ready", "done", "error") or self.setup_window is not None:
@@ -486,6 +615,7 @@ class HudApp:
         if self.recognizer is None or self.camera is None:
             return
         self.session += 1
+        self.mouth_tracker.reset()
         self.active_rec = self.camera.start_recording()
         self.mode = "listening"
         self.tailing = False
@@ -589,7 +719,12 @@ class HudApp:
                         }
                     )
                     self.mode = "done"
-                    self.hud.show("done", "Pasted" if self.args.paste else "Copied", text, hide_after=3.0)
+                    self.hud.show(
+                        "done",
+                        "Pasted" if self.args.paste else "Copied",
+                        text,
+                        hide_after=6.0,
+                    )
                     print(f"[mvp-hud] {output_action}: {text}")
                 except Exception as exc:
                     self._show_error(friendly_error(exc))
@@ -598,7 +733,7 @@ class HudApp:
             self.root.after(50, self._poll_futures)
 
     def _camera_frame(self, frame_bgr: np.ndarray, points: np.ndarray | None) -> None:
-        view = mouth_hud_view(frame_bgr, points)
+        view = mouth_hud_view(frame_bgr, points, self.mouth_tracker)
         if view is None:
             return
         try:
@@ -710,7 +845,7 @@ def main() -> int:
         print("[mvp-hud] self-test passed")
         return 0
 
-    print("[mvp-hud] starting resident bottom HUD; camera is closed until Right Ctrl")
+    print("[mvp-hud] starting resident bottom HUD; camera is closed until F9")
     HudApp(args).run()
     return 0
 

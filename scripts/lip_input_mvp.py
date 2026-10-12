@@ -4,7 +4,7 @@ This is deliberately a small product wrapper around the already-tested
 CNVSRC2025 VSR baseline. It does not train or alter the upstream model.
 
 User flow:
-    launch -> hold Right Ctrl -> collect mouth frames -> release + tail
+    launch -> hold F9 -> collect mouth frames -> release + tail
     -> decode
     -> copy the final Chinese text to the clipboard
 
@@ -413,10 +413,10 @@ def draw_app_screen(
         draw.text((70, 145), "唇语输入法 MVP", font=heading_font, fill=(44, 105, 190))
         draw.text((70, 225), "在不能出声的场合，用无声的说话动作生成中文文本。", font=body_font, fill=(55, 62, 72))
         draw.text((70, 285), "使用方法", font=heading_font, fill=(24, 32, 45))
-        draw.text((70, 335), "按住右 Ctrl 开始录制，松开后自动识别并复制结果。", font=body_font, fill=(55, 62, 72))
+        draw.text((70, 335), "按住 F9 开始录制，松开后自动识别并复制结果。", font=body_font, fill=(55, 62, 72))
         draw.text((70, 400), "当前版本适用于单人、正面、稳定光线的摄像头画面。", font=small_font, fill=(105, 112, 124))
         draw.rounded_rectangle((70, 510, width - 70, 590), radius=14, fill=(235, 243, 255))
-        draw.text((95, 535), "准备就绪 · 按住右 Ctrl 开始", font=heading_font, fill=(35, 91, 170))
+        draw.text((95, 535), "准备就绪 · 按住 F9 开始", font=heading_font, fill=(35, 91, 170))
         draw.text((70, 640), hint, font=small_font, fill=(105, 112, 124))
         return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
@@ -449,7 +449,7 @@ def parse_args() -> argparse.Namespace:
         "--tail-seconds",
         type=float,
         default=0.4,
-        help="Keep capturing this long after Right Ctrl is released",
+        help="Keep capturing this long after F9 is released",
     )
     parser.add_argument(
         "--paste",
@@ -518,7 +518,7 @@ def main() -> int:
 
     print("[mvp] loading RetinaFace + FAN...")
     landmarker = RealtimeLandmarker(vsr_root, args.face_model)
-    print("[mvp] waiting: camera is closed; hold Right Ctrl to start, release to recognize")
+    print("[mvp] waiting: camera is closed; hold F9 to start, release to recognize")
 
     state = AppState()
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lipflow-mvp")
@@ -548,11 +548,11 @@ def main() -> int:
     def on_press(key: keyboard.Key | keyboard.KeyCode) -> None:
         if key == keyboard.Key.esc:
             exit_requested.set()
-        elif key == keyboard.Key.ctrl_r:
+        elif key == keyboard.Key.f9:
             state.start()
 
     def on_release(key: keyboard.Key | keyboard.KeyCode) -> None:
-        if key == keyboard.Key.ctrl_r:
+        if key == keyboard.Key.f9:
             state.request_stop(args.tail_seconds)
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
@@ -574,7 +574,7 @@ def main() -> int:
                 tailing = state.tailing
 
             # Opening the camera is intentionally delayed until the first
-            # Right Ctrl press.
+            # F9 press.
             if recording and capture is None:
                 if not previous_recording:
                     active_session += 1
@@ -782,7 +782,7 @@ def main() -> int:
                     last_mouth_preview,
                     f"正在录制 · {captured_count}f / {tracked_count} tracked",
                     live_text,
-                    "松开右 Ctrl 完成识别",
+                    "松开 F9 完成识别",
                 )
             elif final_text:
                 display = draw_app_screen(
@@ -790,7 +790,7 @@ def main() -> int:
                     last_mouth_preview,
                     "识别完成 · 已复制到剪贴板",
                     final_text,
-                    "再次按住右 Ctrl 开始下一次输入 · Esc 退出",
+                    "再次按住 F9 开始下一次输入 · Esc 退出",
                 )
             elif last_error:
                 display = draw_app_screen(
@@ -798,7 +798,7 @@ def main() -> int:
                     last_mouth_preview,
                     "本次未完成",
                     last_error,
-                    "再次按住右 Ctrl 重试 · Esc 退出",
+                    "再次按住 F9 重试 · Esc 退出",
                 )
             else:
                 display = draw_app_screen(
