@@ -6,7 +6,7 @@ only changes the product shell:
 * no large OpenCV camera window;
 * a hidden resident process with a small bottom-center HUD;
 * a background camera thread;
-* a short tail after F9 is released;
+* a short tail after Right Ctrl is released;
 * live greedy preview and final beam-search recognition stay separate.
 
 The default output is still clipboard-only.  ``--paste`` is intentionally an
@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import queue
 import threading
 import time
@@ -63,11 +64,13 @@ CORNER_RADIUS = 8
 SETUP_BG = "#201e23"
 CAMERA_IDLE_SECONDS = 45.0
 LIVE_PREVIEW_MAX_FRAMES = 150
+TRIGGER_KEY = keyboard.Key.ctrl_r
+TRIGGER_KEY_LABEL = "Right Ctrl"
 
 
 @dataclass
 class Recording:
-    """Thread-safe frames captured for one F9 session."""
+    """Thread-safe frames captured for one Right Ctrl session."""
 
     started: float
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -373,6 +376,456 @@ class HUD:
         self.canvas.itemconfigure(self.body, width=W - x - 22)
 
 
+HOME_BG = "#141316"
+HOME_SIDEBAR = "#101012"
+HOME_PANEL = "#1d1b20"
+HOME_CARD = "#242127"
+HOME_BORDER = "#35313a"
+HOME_DIM = "#aaa4b0"
+HOME_MUTED = "#77727d"
+HOME_WIDTH = 920
+HOME_HEIGHT = 620
+HOME_CORNER_RADIUS = 8
+
+
+class RoundedPanel(tk.Frame):
+    """A Tk container with a geometric rounded background and outline."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        fill: str,
+        border: str,
+        radius: int = HOME_CORNER_RADIUS,
+        border_width: int = 1,
+    ) -> None:
+        outer_bg = str(parent.cget("bg"))
+        super().__init__(parent, bg=outer_bg, bd=0, highlightthickness=0)
+        self._outer_bg = outer_bg
+        self._fill = fill
+        self._border = border
+        self._radius = radius
+        self._border_width = border_width
+        self._canvas = tk.Canvas(
+            self,
+            bg=outer_bg,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self._canvas.pack(fill="both", expand=True)
+        self.content = tk.Frame(self._canvas, bg=fill, bd=0, highlightthickness=0)
+        self._window_id = self._canvas.create_window(
+            (radius, radius),
+            window=self.content,
+            anchor="nw",
+        )
+        self._shape_id: int | None = None
+        self._canvas.bind("<Configure>", self._redraw)
+        self.content.bind("<Configure>", self._content_changed)
+
+    def _content_changed(self, _event: tk.Event) -> None:
+        height = max(2 * self._radius + 4, self.content.winfo_reqheight() + 2 * self._radius)
+        self._canvas.configure(height=height)
+        self.configure(height=height)
+        self._redraw()
+
+    def _redraw(self, _event: tk.Event | None = None) -> None:
+        width = max(self._canvas.winfo_width(), 2 * self._radius + 4)
+        height = max(self._canvas.winfo_height(), 2 * self._radius + 4)
+        self._canvas.itemconfigure(
+            self._window_id,
+            width=max(1, width - 2 * self._radius),
+        )
+        points = rounded_rect_points(width, height, self._radius)
+        if self._shape_id is None:
+            self._shape_id = self._canvas.create_polygon(
+                points,
+                fill=self._fill,
+                outline=self._border,
+                width=self._border_width,
+                joinstyle="round",
+            )
+        else:
+            self._canvas.coords(self._shape_id, *points)
+        self._canvas.tag_lower(self._shape_id)
+        self._canvas.tag_raise(self._window_id)
+
+
+class HomeWindow:
+    """Local history home page; it never opens the camera by itself."""
+
+    def __init__(self, root: tk.Tk, history_path: Path) -> None:
+        self.root = root
+        self.history_path = history_path
+        self.win = tk.Toplevel(root)
+        self.win.title("Move Your Lips")
+        self.win.configure(bg=HOME_BG)
+        self.win.geometry(f"{HOME_WIDTH}x{HOME_HEIGHT}")
+        self.win.minsize(720, 460)
+        self.win.resizable(True, True)
+        self.win.protocol("WM_DELETE_WINDOW", self.hide)
+        self._center_window()
+        self._count_var = tk.StringVar(value="0 recognitions · stored locally")
+        self._history_signature: tuple[int, int] | None = None
+        self._auto_refresh_job: str | None = None
+        self._history_canvas: tk.Canvas
+        self._history_frame: tk.Frame
+        self._history_window_id: int
+        self._build()
+        self.refresh()
+        self.hide()
+        self._schedule_auto_refresh()
+
+    def _center_window(self) -> None:
+        self.win.update_idletasks()
+        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+        self.win.geometry(
+            f"{HOME_WIDTH}x{HOME_HEIGHT}+{(sw - HOME_WIDTH) // 2}+{(sh - HOME_HEIGHT) // 2}"
+        )
+
+    def _build(self) -> None:
+        shell = tk.Frame(self.win, bg=HOME_BG)
+        shell.pack(fill="both", expand=True)
+
+        sidebar = tk.Frame(shell, bg=HOME_SIDEBAR, width=128)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        tk.Label(
+            sidebar,
+            text="MOVE\nYOUR\nLIPS",
+            bg=HOME_SIDEBAR,
+            fg=FG,
+            justify="left",
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=22, pady=(34, 34))
+        home_nav = RoundedPanel(
+            sidebar,
+            fill="#2b2730",
+            border="#2b2730",
+        )
+        home_nav.pack(fill="x", padx=12)
+        tk.Label(
+            home_nav.content,
+            text="HOME",
+            bg="#2b2730",
+            fg=FG,
+            anchor="w",
+            padx=16,
+            pady=10,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(fill="x")
+        main = tk.Frame(shell, bg=HOME_BG)
+        main.pack(side="left", fill="both", expand=True)
+
+        header = tk.Frame(main, bg=HOME_BG)
+        header.pack(fill="x", padx=34, pady=(28, 20))
+        title_box = tk.Frame(header, bg=HOME_BG)
+        title_box.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            title_box,
+            text="Your words",
+            bg=HOME_BG,
+            fg=FG,
+            anchor="w",
+            font=("Segoe UI", 22, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_box,
+            text="Recent silent lip-reading results · Ctrl+R to refresh",
+            bg=HOME_BG,
+            fg=HOME_DIM,
+            anchor="w",
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(5, 0))
+        toolbar = tk.Frame(main, bg=HOME_BG)
+        toolbar.pack(fill="x", padx=34, pady=(0, 12))
+        tk.Label(
+            toolbar,
+            text="History",
+            bg=HOME_BG,
+            fg=FG,
+            anchor="w",
+            font=("Segoe UI", 12, "bold"),
+        ).pack(side="left")
+        actions = tk.Frame(toolbar, bg=HOME_BG)
+        actions.pack(side="right")
+        self._folder_button = tk.Button(
+            actions,
+            text="Open folder",
+            command=self._open_storage_folder,
+            bg="#2b2730",
+            fg=FG,
+            activebackground="#39333f",
+            activeforeground=FG,
+            relief="flat",
+            borderwidth=0,
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 9),
+        )
+        self._folder_button.pack(side="left", padx=(0, 12))
+        tk.Label(
+            actions,
+            textvariable=self._count_var,
+            bg=HOME_BG,
+            fg=HOME_MUTED,
+            anchor="e",
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        body = tk.Frame(main, bg=HOME_BG)
+        body.pack(fill="both", expand=True, padx=(30, 24), pady=(0, 24))
+        scrollbar = tk.Scrollbar(body, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+        self._history_canvas = tk.Canvas(
+            body,
+            bg=HOME_BG,
+            highlightthickness=0,
+            yscrollcommand=scrollbar.set,
+        )
+        self._history_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.configure(command=self._history_canvas.yview)
+        self._history_frame = tk.Frame(self._history_canvas, bg=HOME_BG)
+        self._history_window_id = self._history_canvas.create_window(
+            (0, 0),
+            window=self._history_frame,
+            anchor="nw",
+        )
+        self._history_frame.bind(
+            "<Configure>",
+            lambda _event: self._history_canvas.configure(
+                scrollregion=self._history_canvas.bbox("all")
+            ),
+        )
+        self._history_canvas.bind(
+            "<Configure>",
+            lambda event: self._history_canvas.itemconfigure(
+                self._history_window_id,
+                width=event.width,
+            ),
+        )
+        self._history_canvas.bind("<Enter>", self._enable_mousewheel)
+        self._history_canvas.bind("<Leave>", self._disable_mousewheel)
+        self.win.bind("<Control-r>", self._on_refresh_shortcut)
+        self.win.bind("<Control-R>", self._on_refresh_shortcut)
+
+    def _enable_mousewheel(self, _event: tk.Event) -> None:
+        self.win.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _disable_mousewheel(self, _event: tk.Event) -> None:
+        self.win.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        self._history_canvas.yview_scroll(-int(event.delta / 120), "units")
+
+    def _on_refresh_shortcut(self, _event: tk.Event) -> str:
+        self.refresh()
+        return "break"
+
+    def _get_history_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.history_path.stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size
+
+    def _schedule_auto_refresh(self) -> None:
+        if self.win.winfo_exists():
+            self._auto_refresh_job = self.win.after(1000, self._poll_history)
+
+    def _poll_history(self) -> None:
+        self._auto_refresh_job = None
+        if self.win.winfo_exists():
+            self.refresh(force=False)
+            self._schedule_auto_refresh()
+
+    def _open_storage_folder(self) -> None:
+        try:
+            folder = self.history_path.parent
+            folder.mkdir(parents=True, exist_ok=True)
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                raise OSError("opening local folders is only supported on Windows")
+            startfile(str(folder))
+            self._button_feedback(self._folder_button, "Opened", GREEN, "Open folder", FG)
+        except OSError:
+            self._button_feedback(self._folder_button, "Open failed", RED, "Open folder", FG)
+
+    def _button_feedback(
+        self,
+        button: tk.Button,
+        text: str,
+        color: str,
+        restore_text: str,
+        restore_color: str,
+    ) -> None:
+        try:
+            button.configure(text=text, fg=color)
+        except tk.TclError:
+            return
+
+        def restore() -> None:
+            try:
+                if button.winfo_exists():
+                    button.configure(text=restore_text, fg=restore_color)
+            except tk.TclError:
+                pass
+
+        self.win.after(1200, restore)
+
+    def _copy_entry(self, text: str, button: tk.Button) -> None:
+        try:
+            pyperclip.copy(text)
+        except Exception:
+            self._button_feedback(button, "Copy failed", RED, "Copy", HOME_MUTED)
+            return
+        self._button_feedback(button, "Copied", GREEN, "Copy", HOME_MUTED)
+
+    def _read_history(self) -> list[dict[str, Any]]:
+        if not self.history_path.exists():
+            return []
+        entries: list[dict[str, Any]] = []
+        try:
+            with self.history_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict):
+                        entries.append(item)
+        except OSError:
+            return []
+        return entries
+
+    def refresh(self, force: bool = True) -> None:
+        if not hasattr(self, "_history_frame"):
+            return
+        signature = self._get_history_signature()
+        if not force and signature == self._history_signature:
+            return
+        self._history_signature = signature
+        for child in self._history_frame.winfo_children():
+            child.destroy()
+
+        entries = self._read_history()
+        self._count_var.set(f"{len(entries)} recognitions · stored locally")
+        if not entries:
+            tk.Label(
+                self._history_frame,
+                text="No recognition history yet\nHold Right Ctrl to make your first entry.",
+                bg=HOME_BG,
+                fg=HOME_DIM,
+                justify="center",
+                font=("Segoe UI", 13),
+                pady=80,
+            ).pack(fill="x")
+            return
+
+        for entry in reversed(entries[-100:]):
+            self._add_card(entry)
+
+    def _add_card(self, entry: dict[str, Any]) -> None:
+        card = RoundedPanel(
+            self._history_frame,
+            fill=HOME_CARD,
+            border=HOME_BORDER,
+        )
+        card.pack(fill="x", padx=4, pady=(0, 12))
+        top = tk.Frame(card.content, bg=HOME_CARD)
+        top.pack(fill="x", padx=18, pady=(13, 0))
+        timestamp = str(entry.get("at", "")).replace("T", " ")[:19]
+        action = str(entry.get("output_action", "copied")).upper()
+        action_color = GREEN if action == "COPIED" else AMBER
+        tk.Label(
+            top,
+            text=timestamp or "Unknown time",
+            bg=HOME_CARD,
+            fg=HOME_DIM,
+            anchor="w",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            top,
+            text=action,
+            bg=HOME_CARD,
+            fg=action_color,
+            anchor="e",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right")
+
+        text = str(entry.get("text", "")).strip() or "(empty result)"
+        tk.Label(
+            card.content,
+            text=text,
+            bg=HOME_CARD,
+            fg=FG,
+            anchor="w",
+            justify="left",
+            wraplength=700,
+            font=("Segoe UI", 12),
+        ).pack(fill="x", padx=18, pady=(10, 8))
+
+        metadata: list[str] = []
+        if entry.get("latency_seconds") is not None:
+            try:
+                metadata.append(f"{float(entry['latency_seconds']):.1f}s")
+            except (TypeError, ValueError):
+                pass
+        if entry.get("model_frames") is not None:
+            metadata.append(f"{entry['model_frames']} frames")
+        metadata.append("Right Ctrl · local")
+        footer = tk.Frame(card.content, bg=HOME_CARD)
+        footer.pack(fill="x", padx=18, pady=(0, 13))
+        tk.Label(
+            footer,
+            text=" · ".join(metadata),
+            bg=HOME_CARD,
+            fg=HOME_MUTED,
+            anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(side="left", fill="x", expand=True)
+        copy_button = tk.Button(
+            footer,
+            text="Copy",
+            bg=HOME_CARD,
+            fg=HOME_MUTED,
+            activebackground=HOME_CARD,
+            activeforeground=FG,
+            relief="flat",
+            borderwidth=0,
+            padx=8,
+            pady=2,
+            font=("Segoe UI", 9, "bold"),
+        )
+        copy_button.configure(
+            command=lambda value=text, button=copy_button: self._copy_entry(value, button)
+        )
+        copy_button.pack(side="right")
+
+    def show(self, raise_window: bool = True) -> None:
+        self.refresh()
+        self.win.deiconify()
+        if raise_window:
+            self.win.lift()
+
+    def hide(self) -> None:
+        if self.win.winfo_exists():
+            self.win.withdraw()
+
+    def destroy(self) -> None:
+        if self._auto_refresh_job is not None:
+            try:
+                self.win.after_cancel(self._auto_refresh_job)
+            except tk.TclError:
+                pass
+            self._auto_refresh_job = None
+        if self.win.winfo_exists():
+            self.win.destroy()
+
+
 class CameraWorker:
     """Open the camera only during a recording and capture in a background thread."""
 
@@ -520,6 +973,8 @@ class HudApp:
         self.root = tk.Tk()
         self.root.withdraw()
         self.hud = HUD(self.root)
+        self.home: HomeWindow | None = None
+        self.history_path = PROJECT_ROOT / "outputs" / "mvp" / "recognitions.jsonl"
         self.ui_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=2)
         self.model_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="move-your-lips-model")
         self.detector_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="move-your-lips-detector")
@@ -561,12 +1016,12 @@ class HudApp:
     def _key_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         if key == keyboard.Key.esc:
             self.root.after(0, self.cancel_or_quit)
-        elif key == keyboard.Key.f9 and not self.key_down:
+        elif key == TRIGGER_KEY and not self.key_down:
             self.key_down = True
             self.root.after(0, self.begin_recording)
 
     def _key_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        if key == keyboard.Key.f9 and self.key_down:
+        if key == TRIGGER_KEY and self.key_down:
             self.key_down = False
             self.root.after(0, self.begin_tail)
 
@@ -599,10 +1054,14 @@ class HudApp:
             self._camera_error,
             self.args.detect_interval,
         )
+        if self.home is None:
+            self.home = HomeWindow(self.root, self.history_path)
         self.mode = "ready"
-        self.hud.show("done", "Ready", "Hold F9 and mouth your words", hide_after=2.5)
+        self.hud.show("done", "Ready", f"Hold {TRIGGER_KEY_LABEL} and mouth your words", hide_after=2.5)
         if not self.setup_path.exists():
             self.root.after(250, self.show_setup)
+        else:
+            self.show_home()
 
     def show_setup(self) -> None:
         if self.setup_window is not None or self.exit_requested:
@@ -622,7 +1081,7 @@ class HudApp:
                  font=("Segoe UI", 16, "bold")).pack()
         tk.Label(
             win,
-            text="首次使用先确认交互方式：按住 F9，无声地做出说话动作，\n松开后识别结果会复制到剪贴板。",
+            text=f"首次使用先确认交互方式：按住 {TRIGGER_KEY_LABEL}，无声地做出说话动作，\n松开后识别结果会复制到剪贴板。",
             bg=SETUP_BG,
             fg=DIM,
             justify="center",
@@ -630,7 +1089,7 @@ class HudApp:
         ).pack(pady=(28, 16))
         tk.Label(
             win,
-            text="视频只在你按住 F9 时采集，并保留在本机。\n当前版本先完成基础闭环，个性化模型训练尚未接入。",
+            text=f"视频只在你按住 {TRIGGER_KEY_LABEL} 时采集，并保留在本机。\n当前版本先完成基础闭环，个性化模型训练尚未接入。",
             bg=SETUP_BG,
             fg=DIM,
             justify="center",
@@ -657,6 +1116,26 @@ class HudApp:
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
         win.geometry(f"{width}x{height}+{(sw - width) // 2}+{(sh - height) // 2}")
 
+    def show_home(self, raise_window: bool = True) -> None:
+        if self.home is not None and not self.exit_requested:
+            self.home.show(raise_window=raise_window)
+
+    def hide_home(self) -> None:
+        if self.home is not None:
+            self.home.hide()
+
+    def _restore_home(
+        self,
+        session: int | None = None,
+        raise_window: bool = True,
+    ) -> None:
+        if session is not None and session != self.session:
+            return
+        if self.exit_requested or self.setup_window is not None:
+            return
+        if self.mode in ("ready", "done", "error"):
+            self.show_home(raise_window=raise_window)
+
     def _finish_setup(self) -> None:
         self.setup_path.parent.mkdir(parents=True, exist_ok=True)
         self.setup_path.write_text(json.dumps({"completed_at": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
@@ -666,7 +1145,8 @@ class HudApp:
         if self.setup_window is not None:
             self.setup_window.destroy()
             self.setup_window = None
-        self.hud.show("done", "Ready", "Hold F9 and mouth your words", hide_after=2.5)
+        self.show_home()
+        self.hud.show("done", "Ready", f"Hold {TRIGGER_KEY_LABEL} and mouth your words", hide_after=2.5)
 
     def begin_recording(self) -> None:
         if self.mode not in ("ready", "done", "error") or self.setup_window is not None:
@@ -780,12 +1260,18 @@ class HudApp:
                             "ui": "bottom_hud",
                         }
                     )
+                    if self.home is not None:
+                        self.home.refresh()
                     self.mode = "done"
                     self.hud.show(
                         "done",
                         "Pasted" if self.args.paste else "Copied",
                         text,
                         hide_after=6.0,
+                    )
+                    self.root.after(
+                        6000,
+                        lambda session=session: self._restore_home(session, raise_window=False),
                     )
                     print(f"[mvp-hud] {output_action}: {text}")
                 except Exception as exc:
@@ -836,6 +1322,7 @@ class HudApp:
             self.camera.cancel()
         self.active_rec = None
         self.hud.show("error", "Error", message, hide_after=4.0)
+        self.root.after(4000, lambda: self._restore_home(raise_window=False))
 
     def cancel_or_quit(self) -> None:
         if self.mode in ("listening", "reading"):
@@ -846,6 +1333,7 @@ class HudApp:
             self.active_rec = None
             self.mode = "ready"
             self.hud.show("error", "Cancelled", "", hide_after=1.0)
+            self.root.after(1000, lambda: self._restore_home(raise_window=False))
             return
         self.exit_requested = True
         self.root.quit()
@@ -864,6 +1352,8 @@ class HudApp:
             self.hud.win.destroy()
         except Exception:
             pass
+        if self.home is not None:
+            self.home.destroy()
         self.root.destroy()
 
 
@@ -918,7 +1408,7 @@ def main() -> int:
         print("[mvp-hud] self-test passed")
         return 0
 
-    print("[mvp-hud] starting resident bottom HUD; camera is closed until F9")
+    print(f"[mvp-hud] starting resident bottom HUD; camera is closed until {TRIGGER_KEY_LABEL}")
     HudApp(args).run()
     return 0
 
