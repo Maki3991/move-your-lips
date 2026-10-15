@@ -210,25 +210,6 @@ ApplicationWindow {
                     onClicked: bridge.showHome()
                 }
             }
-
-            Rectangle {
-                id: settingsButton
-                x: 10
-                y: 81
-                width: 50
-                height: 50
-                radius: 20
-                color: "transparent"
-                opacity: 0.45
-                enabled: false
-
-                Image {
-                    anchors.centerIn: parent
-                    source: Qt.resolvedUrl("../assets/settings-disabled.svg")
-                    smooth: true
-                    antialiasing: true
-                }
-            }
         }
 
         Item {

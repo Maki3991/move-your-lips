@@ -11,6 +11,11 @@ Rectangle {
     property var appBridge
     signal deleteRequested(string recordId)
 
+    ListView.onReused: {
+        copyTimer.stop()
+        copyAction.copied = false
+    }
+
     width: 1203
     height: cardTextItem.implicitHeight + 94
     radius: 20
@@ -98,7 +103,13 @@ Rectangle {
                     Rectangle {
                         anchors.fill: parent
                         radius: 10
-                        color: copyMouse.containsMouse ? "#d8f1f5" : "transparent"
+                        color: copyAction.copied || copyMouse.containsMouse ? "#bee7ef" : "transparent"
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 150
+                                easing.type: Easing.OutQuad
+                            }
+                        }
                     }
                     Image {
                         id: copyIcon
@@ -108,13 +119,13 @@ Rectangle {
                         antialiasing: true
                         visible: !copyAction.copied
                     }
-                    Text {
+                    Image {
                         anchors.centerIn: parent
-                        text: "✓"
-                        color: "#4f9a82"
-                        font.family: "Segoe UI"
-                        font.pixelSize: 18
-                        font.weight: Font.DemiBold
+                        width: 24
+                        height: 24
+                        source: Qt.resolvedUrl("../assets/action-copied.svg")
+                        smooth: true
+                        antialiasing: true
                         visible: copyAction.copied
                     }
                     MouseArea {
@@ -122,13 +133,22 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            copyAction.copied = card.appBridge.copyText(card.cardText)
-                            copyTimer.restart()
+                            if (card.appBridge.copyText(card.cardText)) {
+                                copyAction.copied = true
+                                copyTimer.restart()
+                            } else {
+                                copyAction.copied = false
+                                copyTimer.stop()
+                            }
+                        }
+                        onExited: {
+                            copyAction.copied = false
+                            copyTimer.stop()
                         }
                     }
                     Timer {
                         id: copyTimer
-                        interval: 1000
+                        interval: 500
                         onTriggered: copyAction.copied = false
                     }
                 }
