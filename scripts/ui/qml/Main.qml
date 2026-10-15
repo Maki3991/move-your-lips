@@ -19,7 +19,7 @@ ApplicationWindow {
     minimumWidth: Math.min(minimumHomeWidth, Screen.width - 80)
     minimumHeight: Math.min(minimumHomeHeight, Screen.height - 120)
     flags: Qt.Window | Qt.FramelessWindowHint
-    color: "#ffffff"
+    color: "#f6f8f7"
     property bool maximizedByButton: false
 
     function clampWindowPosition() {
@@ -84,7 +84,7 @@ ApplicationWindow {
         x: 0
         y: 0
         width: parent.width
-        height: 52
+        height: 54
         color: "#ffffff"
 
         MouseArea {
@@ -92,6 +92,30 @@ ApplicationWindow {
             z: 0
             acceptedButtons: Qt.LeftButton
             onPressed: homeWindow.startSystemMove()
+        }
+
+        Row {
+            anchors.left: parent.left
+            anchors.leftMargin: 24
+            anchors.verticalCenter: parent.verticalCenter
+            height: 54
+            spacing: 12
+
+            Image {
+                anchors.verticalCenter: parent.verticalCenter
+                source: Qt.resolvedUrl("../assets/myl-v2-brand.svg")
+                width: 10
+                height: 10
+                sourceSize: Qt.size(10, 10)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Move Your Lips"
+                color: "#26383a"
+                font.family: "Inter"
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+            }
         }
 
         Row {
@@ -104,20 +128,20 @@ ApplicationWindow {
 
             Repeater {
                 model: [
-                    { "source": "../assets/window-minimize.svg", "name": "Minimize" },
-                    { "source": "../assets/window-maximize.svg", "name": "Maximize" },
-                    { "source": "../assets/window-close.svg", "name": "Close" }
+                    { "source": "../assets/myl-v2-minimize.svg", "name": "Minimize" },
+                    { "source": "../assets/myl-v2-maximize.svg", "name": "Maximize" },
+                    { "source": "../assets/myl-v2-close.svg", "name": "Close" }
                 ]
 
                 delegate: Item {
                     required property var modelData
                     width: 46
-                    height: 52
+                    height: 54
 
                     Rectangle {
                         anchors.fill: parent
                         color: controlMouse.containsMouse
-                               ? (modelData.name === "Close" ? "#33c96f79" : "#f1f4f5")
+                               ? (modelData.name === "Close" ? "#fbe9eb" : "#eaf4f1")
                                : "transparent"
                     }
 
@@ -131,6 +155,11 @@ ApplicationWindow {
                                    : "../assets/window-restore.svg")
                                 : modelData.source
                         )
+                        width: modelData.name === "Maximize" && homeWindow.maximizedByButton ? 18.667 : 24
+                        height: modelData.name === "Maximize"
+                                ? (homeWindow.maximizedByButton ? 18.667 : 20)
+                                : 24
+                        sourceSize: Qt.size(width, height)
                         rotation: modelData.name === "Maximize" && homeWindow.maximizedByButton ? 90 : 0
                         smooth: true
                         antialiasing: true
@@ -139,7 +168,7 @@ ApplicationWindow {
                     ColorOverlay {
                         anchors.fill: windowIcon
                         source: windowIcon
-                        color: "#c96f79"
+                        color: "#b84e5d"
                         visible: modelData.name === "Close" && controlMouse.containsMouse
                     }
 
@@ -180,26 +209,25 @@ ApplicationWindow {
 
         Rectangle {
             id: sidebar
-            // Figma: 10 px outer left padding + a 50 px navigation button
-            // + an 11 px gap before the main panel.
-            width: 71
+            width: 76
             height: parent.height
             color: "#ffffff"
 
             Rectangle {
                 id: homeButton
                 x: 10
-                y: 0
+                y: 26
                 width: 50
                 height: 50
                 radius: 20
-                color: Qt.rgba(190 / 255, 231 / 255, 239 / 255, 0.6)
+                color: "#eaf4f1"
 
                 Image {
                     anchors.centerIn: parent
-                    source: Qt.resolvedUrl("../assets/home-active.svg")
-                    width: 30
-                    height: 30
+                    source: Qt.resolvedUrl("../assets/myl-v2-home.svg")
+                    width: 24.5
+                    height: 25.75
+                    sourceSize: Qt.size(24.5, 25.75)
                     fillMode: Image.PreserveAspectFit
                     smooth: true
                     antialiasing: true
@@ -212,72 +240,162 @@ ApplicationWindow {
             }
         }
 
-        Item {
+        Rectangle {
             id: contentPanel
-            width: parent.width - sidebar.width - 11
-            height: parent.height - 8
+            width: parent.width - sidebar.width
+            height: parent.height
             clip: true
+            color: "#f6f8f7"
 
-            Rectangle {
-                id: contentSurface
-                anchors.fill: parent
-                radius: 20
-                color: "#d8f1f5"
-            }
+            Item {
+                id: historyContent
+                width: Math.min(920, parent.width - 48)
+                height: parent.height
+                anchors.horizontalCenter: parent.horizontalCenter
 
-            Text {
-                id: historyTitle
-                x: 69
-                y: 16
-                text: "History"
-                color: "#2f3a3d"
-                font.family: "Segoe UI"
-                font.pixelSize: 22
-                font.weight: Font.DemiBold
-                verticalAlignment: Text.AlignVCenter
-            }
+                Item {
+                    id: pageHeading
+                    x: 0
+                    y: 40
+                    width: parent.width
+                    height: 101
 
-            ListView {
-                id: historyList
-                objectName: "historyList"
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.leftMargin: 69
-                anchors.rightMargin: 86
-                anchors.topMargin: 60
-                clip: true
-                spacing: 20
-                model: bridge.historyItems
-                boundsBehavior: Flickable.StopAtBounds
-                reuseItems: true
+                    Column {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 5
+                        Text {
+                            text: "HOME  /  HISTORY"
+                            color: "#286f70"
+                            font.family: "Inter"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            text: "识别记录"
+                            color: "#26383a"
+                            font.family: "Inter"
+                            font.pixelSize: 30
+                            font.weight: Font.DemiBold
+                            lineHeightMode: Text.FixedHeight
+                            lineHeight: 38
+                        }
+                    }
 
-                delegate: HistoryCard {
-                    required property var modelData
-                    width: historyList.width
-                    recordId: modelData.recordId
-                    cardText: modelData.text
-                    timestamp: modelData.timestamp
-                    appBridge: bridge
-                    onDeleteRequested: function(id) {
-                        pendingDeleteId = id
-                        deleteDialog.open()
+                    Rectangle {
+                        id: shortcutHint
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 188
+                        height: 42
+                        radius: 12
+                        color: "#eaf4f1"
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Text {
+                                text: "右 Ctrl"
+                                color: "#286f70"
+                                font.family: "Inter"
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                text: "开始识别"
+                                color: "#64777a"
+                                font.family: "Inter"
+                                font.pixelSize: 13
+                            }
+                        }
                     }
                 }
 
-            }
+                Rectangle {
+                    id: headerDivider
+                    anchors.top: pageHeading.bottom
+                    anchors.topMargin: 24
+                    width: parent.width
+                    height: 1
+                    color: "#dee8e5"
+                }
 
-            Text {
-                anchors.centerIn: historyList
-                visible: bridge.historyItems.length === 0
-                text: "还没有识别记录\n按住 Right Ctrl 创建第一条记录"
-                color: "#718487"
-                font.family: "Segoe UI"
-                font.pixelSize: 16
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                lineHeight: 24
+                ListView {
+                    id: historyList
+                    objectName: "historyList"
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: headerDivider.bottom
+                    anchors.topMargin: 24
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 36
+                    clip: true
+                    spacing: 12
+                    model: bridge.historyItems
+                    boundsBehavior: Flickable.StopAtBounds
+                    reuseItems: true
+
+                    delegate: Column {
+                        required property var modelData
+                        required property int index
+                        width: historyList.width
+                        spacing: 12
+
+                        Item {
+                            width: 1
+                            height: modelData.showDateHeader && index > 0 ? 12 : 0
+                            visible: height > 0
+                        }
+
+                        Row {
+                            width: parent.width
+                            height: 26
+                            spacing: 10
+                            visible: modelData.showDateHeader
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.dateTitle
+                                color: "#26383a"
+                                font.family: "Inter"
+                                font.pixelSize: 16
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.dateCaption
+                                color: "#64777a"
+                                font.family: "Inter"
+                                font.pixelSize: 13
+                                font.weight: Font.Medium
+                                visible: text.length > 0
+                            }
+                        }
+
+                        HistoryCard {
+                            width: parent.width
+                            recordId: modelData.recordId
+                            cardText: modelData.text
+                            leadText: modelData.lead
+                            previewText: modelData.preview
+                            timestamp: modelData.timestamp
+                            appBridge: bridge
+                            onDeleteRequested: function(id) {
+                                pendingDeleteId = id
+                                deleteDialog.open()
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: historyList
+                    visible: bridge.historyItems.length === 0
+                    text: "还没有识别记录\n按住右 Ctrl 创建第一条记录"
+                    color: "#64777a"
+                    font.family: "Inter"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    lineHeight: 1.7
+                }
             }
         }
     }
@@ -296,7 +414,7 @@ ApplicationWindow {
             width: 2
             height: 9
             radius: 1
-            color: "#9fcdd3"
+            color: "#89beb8"
             rotation: 45
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -308,7 +426,7 @@ ApplicationWindow {
             width: 2
             height: 6
             radius: 1
-            color: "#9fcdd3"
+            color: "#89beb8"
             rotation: 45
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -344,7 +462,7 @@ ApplicationWindow {
         background: Rectangle {
             radius: 16
             color: "#ffffff"
-            border.color: "#d9e3e5"
+            border.color: "#dee8e5"
             border.width: 1
         }
 
@@ -356,7 +474,7 @@ ApplicationWindow {
 
                 Text {
                     text: "删除这条识别记录？"
-                    color: "#2f3a3d"
+                    color: "#26383a"
                     font.family: "Segoe UI"
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
@@ -365,7 +483,7 @@ ApplicationWindow {
                 Text {
                     width: parent.width
                     text: "这会从本地历史记录中移除该条文本，且无法撤销。"
-                    color: "#66777b"
+                    color: "#64777a"
                     font.family: "Segoe UI"
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap
@@ -384,13 +502,13 @@ ApplicationWindow {
                         width: 88
                         height: 36
                         radius: 10
-                        color: cancelMouse.containsMouse ? "#eef7f8" : "#ffffff"
-                        border.color: "#cfdddf"
+                        color: cancelMouse.containsMouse ? "#eaf4f1" : "#ffffff"
+                        border.color: "#dee8e5"
 
                         Text {
                             anchors.centerIn: parent
                             text: "取消"
-                            color: "#405054"
+                            color: "#26383a"
                             font.family: "Segoe UI"
                             font.pixelSize: 14
                         }
@@ -406,7 +524,7 @@ ApplicationWindow {
                         width: 88
                         height: 36
                         radius: 10
-                        color: deleteMouse.containsMouse ? "#b85d68" : "#c96f79"
+                        color: deleteMouse.containsMouse ? "#a94353" : "#b84e5d"
 
                         Text {
                             anchors.centerIn: parent
@@ -449,7 +567,7 @@ ApplicationWindow {
 
         background: Rectangle {
             radius: 12
-            color: "#2f3a3d"
+            color: "#26383a"
             opacity: 0.94
         }
 

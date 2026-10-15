@@ -7,24 +7,30 @@ Rectangle {
     objectName: "historyCard"
     property string recordId: ""
     property string cardText: ""
-    property string timestamp: "--:--"
+    property string leadText: ""
+    property string previewText: ""
+    property string timestamp: "时间未知"
     property var appBridge
     signal deleteRequested(string recordId)
 
-    ListView.onReused: {
+    onRecordIdChanged: {
         copyTimer.stop()
         copyAction.copied = false
     }
 
-    width: 1203
-    height: cardTextItem.implicitHeight + 94
-    radius: 20
-    color: cardHover.hovered ? "#ffffff" : Qt.rgba(1, 1, 1, 0.2)
+    width: 920
+    height: 22 + leadItem.implicitHeight
+            + (previewItem.visible ? 8 + previewItem.implicitHeight : 0)
+            + 8 + 32 + 22
+    radius: 16
+    color: "#ffffff"
+    border.width: 1
+    border.color: cardHover.hovered ? "#89beb8" : "#dee8e5"
     antialiasing: true
 
-    Behavior on color {
+    Behavior on border.color {
         ColorAnimation {
-            duration: 160
+            duration: 180
             easing.type: Easing.InOutQuad
         }
     }
@@ -33,68 +39,91 @@ Rectangle {
         id: cardHover
     }
 
+    layer.enabled: cardHover.hovered
+    layer.effect: DropShadow {
+        transparentBorder: true
+        color: "#141f4240"
+        horizontalOffset: 0
+        verticalOffset: 8
+        radius: 10
+        samples: 21
+    }
+
     Text {
-        id: cardTextItem
+        id: leadItem
         objectName: "historyCardText"
-        x: 20
-        y: 20
-        width: parent.width - 40
-        text: card.cardText
-        color: "#2f3a3d"
-        font.family: "Segoe UI"
-        font.pixelSize: 22
-        font.weight: Font.Normal
-        wrapMode: Text.WordWrap
+        x: 22
+        y: 22
+        width: parent.width - 44
+        text: card.leadText
+        color: "#26383a"
+        font.family: "Inter"
+        font.pixelSize: 17
+        font.weight: Font.DemiBold
+        wrapMode: Text.WrapAnywhere
         textFormat: Text.PlainText
         lineHeightMode: Text.FixedHeight
-        lineHeight: 27
+        lineHeight: 26
+        renderType: Text.QtRendering
+    }
+
+    Text {
+        id: previewItem
+        x: 22
+        y: leadItem.y + leadItem.implicitHeight + 8
+        width: parent.width - 44
+        text: card.previewText
+        visible: text.length > 0
+        color: "#64777a"
+        font.family: "Inter"
+        font.pixelSize: 14
+        wrapMode: Text.WrapAnywhere
+        textFormat: Text.PlainText
+        lineHeightMode: Text.FixedHeight
+        lineHeight: 22
         renderType: Text.QtRendering
     }
 
     Item {
         id: footer
         objectName: "historyCardFooter"
-        x: 20
-        y: cardTextItem.y + cardTextItem.implicitHeight + 22
-        width: parent.width - 40
+        x: 22
+        y: previewItem.visible
+           ? previewItem.y + previewItem.implicitHeight + 8
+           : leadItem.y + leadItem.implicitHeight + 8
+        width: parent.width - 44
         height: 32
 
         Text {
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             text: card.timestamp
-            color: "#718487"
-            font.family: "Segoe UI"
-            font.pixelSize: 16
+            color: "#64777a"
+            font.family: "Inter"
+            font.pixelSize: 13
+            font.weight: Font.Medium
             verticalAlignment: Text.AlignVCenter
         }
 
-        Rectangle {
+        Row {
             id: actionGroup
             objectName: "historyCardActions"
             anchors.right: parent.right
             anchors.top: parent.top
             width: 96
             height: 32
-            radius: 10
-            // Figma's Actions container is transparent; only the hovered
-            // icon button receives its own background.
-            color: "transparent"
             opacity: cardHover.hovered ? 1 : 0
             visible: opacity > 0.01
 
             Behavior on opacity {
                 NumberAnimation {
-                    duration: 140
+                    duration: 180
                     easing.type: Easing.InOutQuad
                 }
             }
 
-            Row {
-                anchors.fill: parent
-                spacing: 0
-
-                Item {
+            spacing: 0
+            Item {
                     id: copyAction
                     width: 32
                     height: 32
@@ -103,7 +132,8 @@ Rectangle {
                     Rectangle {
                         anchors.fill: parent
                         radius: 10
-                        color: copyAction.copied || copyMouse.containsMouse ? "#bee7ef" : "transparent"
+                        color: copyAction.copied ? "#286f70"
+                                                 : (copyMouse.containsMouse ? "#eaf4f1" : "transparent")
                         Behavior on color {
                             ColorAnimation {
                                 duration: 150
@@ -114,7 +144,10 @@ Rectangle {
                     Image {
                         id: copyIcon
                         anchors.centerIn: parent
-                        source: Qt.resolvedUrl("../assets/action-copy.svg")
+                        source: Qt.resolvedUrl("../assets/myl-v2-copy.svg")
+                        width: 15.333
+                        height: 18.667
+                        sourceSize: Qt.size(width, height)
                         smooth: true
                         antialiasing: true
                         visible: !copyAction.copied
@@ -160,19 +193,22 @@ Rectangle {
                     Rectangle {
                         anchors.fill: parent
                         radius: 10
-                        color: deleteMouse.containsMouse ? "#33c96f79" : "transparent"
+                        color: deleteMouse.containsMouse ? "#fbe9eb" : "transparent"
                     }
                     Image {
                         id: deleteIcon
                         anchors.centerIn: parent
-                        source: Qt.resolvedUrl("../assets/action-delete.svg")
+                        source: Qt.resolvedUrl("../assets/myl-v2-delete.svg")
+                        width: 21
+                        height: 20.667
+                        sourceSize: Qt.size(width, height)
                         smooth: true
                         antialiasing: true
                     }
                     ColorOverlay {
                         anchors.fill: deleteIcon
                         source: deleteIcon
-                        color: "#c96f79"
+                        color: "#b84e5d"
                         visible: deleteMouse.containsMouse
                     }
                     MouseArea {
@@ -190,12 +226,15 @@ Rectangle {
                     Rectangle {
                         anchors.fill: parent
                         radius: 10
-                        color: moreMouse.containsMouse ? "#d8f1f5" : "transparent"
+                        color: moreMouse.containsMouse ? "#eaf4f1" : "transparent"
                     }
                     Image {
                         id: moreIcon
                         anchors.centerIn: parent
-                        source: Qt.resolvedUrl("../assets/action-more.svg")
+                        source: Qt.resolvedUrl("../assets/myl-v2-more.svg")
+                        width: 18.5
+                        height: 18
+                        sourceSize: Qt.size(width, height)
                         smooth: true
                         antialiasing: true
                     }
@@ -209,7 +248,6 @@ Rectangle {
                         ToolTip.delay: 450
                     }
                 }
-            }
         }
     }
 }

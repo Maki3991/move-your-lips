@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,6 +42,7 @@ from lip_input_mvp import (
     friendly_error,
     paste_text,
 )
+from .history_presentation import decorate_history_items
 
 
 class PreviewImageProvider(QQuickImageProvider):
@@ -91,6 +93,7 @@ class AppBridge(QObject):
         self.history_path = history_path
         self._history_items: list[dict[str, Any]] = []
         self._history_signature: tuple[int, int] | None = None
+        self._history_day = None
         self._home_visible = False
         self._hud_visible = True
         self._hud_mode = "loading"
@@ -171,14 +174,16 @@ class AppBridge(QObject):
         self.refresh_history(force=True)
 
     def refresh_history(self, force: bool = False) -> None:
+        today = datetime.now().astimezone().date()
         try:
             stat = self.history_path.stat()
             signature = (stat.st_mtime_ns, stat.st_size)
         except OSError:
             signature = None
-        if not force and signature == self._history_signature:
+        if not force and signature == self._history_signature and today == self._history_day:
             return
         self._history_signature = signature
+        self._history_day = today
 
         items: list[dict[str, Any]] = []
         try:
@@ -196,21 +201,16 @@ class AppBridge(QObject):
             if not isinstance(item, dict):
                 continue
             item_text = str(item.get("text", "")).strip() or "(empty result)"
-            raw_timestamp = str(item.get("at", ""))
-            if "T" in raw_timestamp:
-                timestamp = raw_timestamp.split("T", 1)[1][:5]
-            else:
-                timestamp = raw_timestamp[-5:]
             digest = hashlib.sha256(raw_line).hexdigest()
             items.append(
                 {
                     "recordId": f"{line_index}:{digest}",
                     "text": item_text,
-                    "timestamp": timestamp or "--:--",
+                    "at": str(item.get("at", "")),
                 }
             )
 
-        self._history_items = list(reversed(items[-100:]))
+        self._history_items = decorate_history_items(list(reversed(items[-100:])), today)
         self.historyChanged.emit()
 
     @Slot(str, result=bool)
