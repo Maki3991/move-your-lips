@@ -1,7 +1,9 @@
-"""Resident, Lipflow-style desktop shell for the Chinese lip-input MVP.
+"""Resident desktop shell for the Chinese lip-input MVP.
 
 The recognition components are reused from ``lip_input_mvp.py``.  This module
-only changes the product shell:
+keeps the camera/recognition workflow; the active Home and HUD presentation is
+implemented in ``scripts/ui`` with PySide6 and QML.  The earlier Tk views remain
+below as a local reference while the migration is being exercised.
 
 * no large OpenCV camera window;
 * a hidden resident process with a small bottom-center HUD;
@@ -50,18 +52,27 @@ from lip_input_mvp import (
 )
 
 
-BG = "#1d1b20"
-FG = "#ffffff"
-DIM = "#b9b4bf"
+BG = "#ffffff"
+FG = "#2f3a3d"
+DIM = "#66777b"
 TRANSPARENT = "#ff00fe"
-ACCENT = "#ff5473"
-GREEN = "#4dd98c"
-AMBER = "#ffb840"
-RED = "#ff6b5e"
+ACCENT = "#bee7ef"
+GREEN = "#77b8a9"
+AMBER = "#bee7ef"
+RED = "#c96f79"
 W, H = 420, 86
 VIDEO_W, VIDEO_H = 112, 70
 CORNER_RADIUS = 8
-SETUP_BG = "#201e23"
+HUD_BG = "#ffffff"
+HUD_BORDER = "#d9d9d9"
+HUD_TITLE = "#383838"
+HUD_BODY = "#616161"
+HUD_LIVE = "#474747"
+HUD_HINT = "#858585"
+HUD_VIDEO_BG = "#e5f5f7"
+HUD_SPINNER = "#bee7ef"
+HUD_RESULT_DOT = "#d9d9d9"
+SETUP_BG = "#ffffff"
 CAMERA_IDLE_SECONDS = 45.0
 LIVE_PREVIEW_MAX_FRAMES = 150
 TRIGGER_KEY = keyboard.Key.ctrl_r
@@ -211,17 +222,17 @@ def rounded_rect_points(
     return points
 
 
-class HUD:
-    """Bottom-center, non-activating floating pill similar to Lipflow's HUD."""
+def shifted_points(points: list[float], offset_x: float, offset_y: float) -> list[float]:
+    shifted: list[float] = []
+    for index in range(0, len(points), 2):
+        shifted.extend((points[index] + offset_x, points[index + 1] + offset_y))
+    return shifted
 
-    STATES = {
-        "loading": AMBER,
-        "ready": AMBER,
-        "listening": ACCENT,
-        "reading": AMBER,
-        "done": GREEN,
-        "error": RED,
-    }
+
+class HUD:
+    """Fixed-size, bottom-center status HUD matching the Figma state designs."""
+
+    SPINNER_MODES = {"loading", "starting_camera", "processing", "reading"}
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -243,26 +254,83 @@ class HUD:
             highlightthickness=0,
         )
         canvas.pack()
-        # Keep this on the Canvas for now.  The previous RGBA downsampling
-        # approach created a magenta halo when combined with Tk's transparent
-        # color.  The geometric path keeps the straight edges intact.
         self.background = canvas.create_polygon(
             rounded_rect_points(self.width, self.height, CORNER_RADIUS),
             smooth=False,
-            fill=BG,
-            outline="",
+            fill=HUD_BG,
+            outline=HUD_BORDER,
+            width=1,
         )
         self.canvas = canvas
-        self.title_font = tkfont.Font(root=root, family="Segoe UI", size=9, weight="bold")
-        self.body_font = tkfont.Font(root=root, family="Segoe UI", size=12)
-        self.dot = canvas.create_oval(22, 22, 32, 32, fill=AMBER, outline="")
-        self.video_item = canvas.create_image(18 + VIDEO_W // 2, H // 2, state="hidden")
-        self.title = canvas.create_text(42, 27, anchor="w", fill=DIM, font=self.title_font)
-        self.body = canvas.create_text(22, 54, anchor="w", fill=FG, font=self.body_font, width=W - 44)
+        try:
+            available_fonts = set(tkfont.families(root))
+        except tk.TclError:
+            available_fonts = set()
+        family = "Inter" if "Inter" in available_fonts else "Segoe UI"
+        self.title_font = tkfont.Font(root=root, family=family, size=12, weight="bold")
+        self.body_font = tkfont.Font(root=root, family=family, size=12)
+        self.live_font = tkfont.Font(root=root, family=family, size=11)
+        self.hint_font = tkfont.Font(root=root, family=family, size=10)
+        self.spinner = canvas.create_arc(
+            19,
+            17,
+            31,
+            29,
+            start=45,
+            extent=285,
+            style="arc",
+            outline=HUD_SPINNER,
+            width=2,
+            state="hidden",
+        )
+        self.dot = canvas.create_oval(19, 17, 29, 27, fill=HUD_RESULT_DOT, outline="", state="hidden")
+        self.video_placeholder = canvas.create_polygon(
+            shifted_points(rounded_rect_points(VIDEO_W, VIDEO_H, 6), 19, 7),
+            smooth=False,
+            fill=HUD_VIDEO_BG,
+            outline=HUD_BORDER,
+            width=1,
+            state="hidden",
+        )
+        self.video_placeholder_text = canvas.create_text(
+            75,
+            42,
+            text="嘴唇实时预览",
+            anchor="center",
+            fill="#707070",
+            font=self.hint_font,
+            state="hidden",
+        )
+        self.video_item = canvas.create_image(75, 42, state="hidden")
+        self.title = canvas.create_text(
+            39,
+            23,
+            anchor="w",
+            fill=HUD_TITLE,
+            font=self.title_font,
+        )
+        self.body = canvas.create_text(
+            19,
+            48,
+            anchor="nw",
+            fill=HUD_BODY,
+            font=self.body_font,
+            width=W - 38,
+        )
+        self.hint = canvas.create_text(
+            147,
+            57,
+            anchor="nw",
+            fill=HUD_HINT,
+            font=self.hint_font,
+            state="hidden",
+        )
         self._image: ImageTk.PhotoImage | None = None
         self.mode = ""
         self.body_text = ""
         self._hide_job: str | None = None
+        self._spinner_job: str | None = None
+        self._spinner_angle = 45
         self._set_no_activate()
         self.hide()
 
@@ -284,15 +352,24 @@ class HUD:
         if self._hide_job is not None:
             self.root.after_cancel(self._hide_job)
             self._hide_job = None
+        if mode == "ready":
+            self.hide()
+            return
         self.mode = mode
-        self.canvas.itemconfigure(self.dot, fill=self.STATES.get(mode, AMBER))
-        self.canvas.itemconfigure(self.title, text=title.upper())
-        if mode != "listening":
+        self.canvas.itemconfigure(self.title, text=title)
+        if mode == "listening":
+            self._show_video_placeholder()
+            self._layout(True)
+        else:
             self._clear_video()
             self._layout(False)
         self.set_text(body)
         self.win.deiconify()
         self.win.lift()
+        if mode in self.SPINNER_MODES:
+            self._start_spinner()
+        else:
+            self._stop_spinner()
         if hide_after:
             self._hide_job = self.root.after(int(hide_after * 1000), self.hide)
 
@@ -317,25 +394,28 @@ class HUD:
             fill=255,
         )
         mask = large_mask.resize(image.size, Image.Resampling.LANCZOS)
-        background = Image.new("RGB", image.size, BG)
+        background = Image.new("RGB", image.size, HUD_VIDEO_BG)
         image = Image.composite(image, background, mask)
         self._image = ImageTk.PhotoImage(image)
+        self.canvas.itemconfigure(self.video_placeholder, state="hidden")
+        self.canvas.itemconfigure(self.video_placeholder_text, state="hidden")
         self.canvas.itemconfigure(self.video_item, image=self._image, state="normal")
         self._layout(True)
 
-    def _fit_single_line(self, body: str, max_width: int) -> str:
+    def _fit_single_line(self, body: str, max_width: int, font: tkfont.Font | None = None) -> str:
         """Fit final output on one line and put the ellipsis at the end."""
 
+        font = font or self.body_font
         body = " ".join(body.replace("\r", "").split("\n")).strip()
-        if self.body_font.measure(body) <= max_width:
+        if font.measure(body) <= max_width:
             return body
 
         ellipsis = "..."
-        available = max(1, max_width - self.body_font.measure(ellipsis))
+        available = max(1, max_width - font.measure(ellipsis))
         low, high = 0, len(body)
         while low < high:
             middle = (low + high + 1) // 2
-            if self.body_font.measure(body[:middle]) <= available:
+            if font.measure(body[:middle]) <= available:
                 low = middle
             else:
                 high = middle - 1
@@ -343,49 +423,109 @@ class HUD:
 
     def set_text(self, body: str) -> None:
         self.body_text = body
-        live_preview = self.canvas.itemcget(self.video_item, "state") != "hidden"
-        if self.mode == "done":
-            x = 18 + VIDEO_W + 14 if live_preview else 22
-            shown = self._fit_single_line(body, W - x - 22)
+        live_preview = self.mode == "listening"
+        if live_preview:
+            shown = body or "实时识别：等待识别内容"
+            shown = self._fit_single_line(shown, 252, self.live_font)
+            self.canvas.itemconfigure(self.body, font=self.live_font, fill=HUD_LIVE)
+        elif self.mode in ("result", "done"):
+            shown = self._fit_single_line(body, W - 38)
+            self.canvas.itemconfigure(self.body, font=self.body_font, fill=HUD_BODY)
         else:
-            limit = 34 if live_preview else 46
-            shown = body if len(body) <= limit else "..." + body[-limit:]
+            shown = self._fit_single_line(body, W - 38)
+            self.canvas.itemconfigure(self.body, font=self.body_font, fill=HUD_BODY)
         self.canvas.itemconfigure(self.body, text=shown)
 
     def hide(self) -> None:
         if self._hide_job is not None:
             self.root.after_cancel(self._hide_job)
             self._hide_job = None
+        self._stop_spinner()
         self._clear_video()
         self.mode = ""
         self.win.withdraw()
 
     def _clear_video(self) -> None:
         self.canvas.itemconfigure(self.video_item, state="hidden", image="")
+        self.canvas.itemconfigure(self.video_placeholder, state="hidden")
+        self.canvas.itemconfigure(self.video_placeholder_text, state="hidden")
+        self._image = None
+
+    def _show_video_placeholder(self) -> None:
+        self.canvas.itemconfigure(self.video_item, state="hidden", image="")
+        self.canvas.itemconfigure(self.video_placeholder, state="normal")
+        self.canvas.itemconfigure(self.video_placeholder_text, state="normal")
         self._image = None
 
     def _layout(self, video: bool) -> None:
         if video:
-            x = 18 + VIDEO_W + 14
-            self.canvas.coords(self.video_item, 18 + VIDEO_W // 2, H // 2)
+            x = 147
+            self.canvas.coords(self.video_item, 75, 42)
+            self.canvas.coords(self.dot, x, 14, x + 10, 24)
+            self.canvas.coords(self.spinner, x - 1, 13, x + 11, 25)
+            self.canvas.coords(self.title, x + 18, 19)
+            self.canvas.coords(self.body, x, 34)
+            self.canvas.coords(self.hint, x, 57)
+            self.canvas.itemconfigure(self.body, width=252)
+            self.canvas.itemconfigure(self.hint, state="normal", text="松开 Right Ctrl 完成")
         else:
-            x = 22
-        self.canvas.coords(self.dot, x, 22, x + 10, 32)
-        self.canvas.coords(self.title, x + 20, 27)
-        self.canvas.coords(self.body, x, 54)
-        self.canvas.itemconfigure(self.body, width=W - x - 22)
+            x = 19
+            self.canvas.coords(self.dot, x, 18, x + 10, 28)
+            self.canvas.coords(self.spinner, x, 17, x + 12, 29)
+            self.canvas.coords(self.title, x + 20, 23)
+            self.canvas.coords(self.body, x, 48)
+            self.canvas.coords(self.hint, x, 57)
+            self.canvas.itemconfigure(self.body, width=W - 38)
+            self.canvas.itemconfigure(self.hint, state="hidden")
+        self.canvas.itemconfigure(
+            self.spinner,
+            state="normal" if self.mode in self.SPINNER_MODES else "hidden",
+        )
+        self.canvas.itemconfigure(
+            self.dot,
+            state="hidden" if self.mode in self.SPINNER_MODES else "normal",
+            fill=ACCENT if self.mode == "listening" else (RED if self.mode == "error" else HUD_RESULT_DOT),
+        )
+
+    def _start_spinner(self) -> None:
+        if self._spinner_job is None:
+            self._animate_spinner()
+
+    def _stop_spinner(self) -> None:
+        if self._spinner_job is not None:
+            try:
+                self.root.after_cancel(self._spinner_job)
+            except tk.TclError:
+                pass
+            self._spinner_job = None
+
+    def _animate_spinner(self) -> None:
+        if self.mode not in self.SPINNER_MODES:
+            self._spinner_job = None
+            return
+        self.canvas.itemconfigure(self.spinner, start=self._spinner_angle)
+        self._spinner_angle = (self._spinner_angle + 30) % 360
+        self._spinner_job = self.root.after(80, self._animate_spinner)
 
 
-HOME_BG = "#141316"
-HOME_SIDEBAR = "#101012"
-HOME_PANEL = "#1d1b20"
-HOME_CARD = "#242127"
-HOME_BORDER = "#35313a"
-HOME_DIM = "#aaa4b0"
-HOME_MUTED = "#77727d"
-HOME_WIDTH = 920
-HOME_HEIGHT = 620
-HOME_CORNER_RADIUS = 8
+HOME_BG = "#ffffff"
+HOME_SIDEBAR = "#ffffff"
+HOME_CONTENT = "#d8f1f5"
+HOME_CARD = "#e0f3f6"
+HOME_BORDER = HOME_CARD
+HOME_TEXT = "#2f3a3d"
+HOME_DIM = "#718487"
+HOME_MUTED = "#8a9a9d"
+HOME_ACTIVE = HOME_CONTENT
+HOME_ACTION = "#c9e3e7"
+HOME_WIDTH = 1440
+HOME_HEIGHT = 900
+HOME_MIN_WIDTH = 1000
+HOME_MIN_HEIGHT = 650
+HOME_TOPBAR_HEIGHT = 52
+HOME_SIDEBAR_WIDTH = 98
+HOME_CONTENT_INSET = 69
+HOME_CORNER_RADIUS = 20
 
 
 class RoundedPanel(tk.Frame):
@@ -453,141 +593,165 @@ class RoundedPanel(tk.Frame):
         self._canvas.tag_raise(self._window_id)
 
 
+class FigmaContentPanel(tk.Frame):
+    """A full-size content surface with the Home screen's rounded top-left edge."""
+
+    def __init__(self, parent: tk.Misc, *, fill: str, radius: int) -> None:
+        outer_bg = str(parent.cget("bg"))
+        super().__init__(parent, bg=outer_bg, bd=0, highlightthickness=0)
+        self._outer_bg = outer_bg
+        self._radius = radius
+        self._canvas = tk.Canvas(
+            self,
+            bg=outer_bg,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self._canvas.pack(fill="both", expand=True)
+        self.content = tk.Frame(self._canvas, bg=fill, bd=0, highlightthickness=0)
+        self._window_id = self._canvas.create_window(
+            (0, 0),
+            window=self.content,
+            anchor="nw",
+        )
+        self._mask_id: int | None = None
+        self._canvas.bind("<Configure>", self._redraw)
+
+    def _redraw(self, _event: tk.Event | None = None) -> None:
+        width = max(self._canvas.winfo_width(), 1)
+        height = max(self._canvas.winfo_height(), 1)
+        self._canvas.itemconfigure(self._window_id, width=width, height=height)
+        if self._mask_id is not None:
+            self._canvas.delete(self._mask_id)
+        radius = min(self._radius, width // 2, height // 2)
+        points: list[float] = [0, 0, radius, 0]
+        for index in range(13):
+            angle = math.radians(-90 - 90 * index / 12)
+            points.extend(
+                (
+                    radius + radius * math.cos(angle),
+                    radius + radius * math.sin(angle),
+                )
+            )
+        points.extend((0, radius, 0, 0))
+        self._mask_id = self._canvas.create_polygon(
+            points,
+            fill=self._outer_bg,
+            outline=self._outer_bg,
+            smooth=False,
+        )
+        self._canvas.tag_raise(self._mask_id)
+
+
 class HomeWindow:
-    """Local history home page; it never opens the camera by itself."""
+    """Figma-based local history page; it never opens the camera by itself."""
 
     def __init__(self, root: tk.Tk, history_path: Path) -> None:
         self.root = root
         self.history_path = history_path
         self.win = tk.Toplevel(root)
-        self.win.title("Move Your Lips")
+        self.win.overrideredirect(True)
         self.win.configure(bg=HOME_BG)
-        self.win.geometry(f"{HOME_WIDTH}x{HOME_HEIGHT}")
-        self.win.minsize(720, 460)
+        self.font_family = self._resolve_font_family()
+        screen_width = self.win.winfo_screenwidth()
+        screen_height = self.win.winfo_screenheight()
+        self.window_width = min(HOME_WIDTH, max(720, screen_width - 40))
+        self.window_height = min(HOME_HEIGHT, max(520, screen_height - 80))
+        self.win.geometry(f"{self.window_width}x{self.window_height}")
+        self.win.minsize(HOME_MIN_WIDTH, HOME_MIN_HEIGHT)
         self.win.resizable(True, True)
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
+        self._is_maximized = False
+        self._normal_geometry: tuple[int, int, int, int] | None = None
+        self._drag_offset: tuple[int, int] | None = None
         self._center_window()
-        self._count_var = tk.StringVar(value="0 recognitions · stored locally")
         self._history_signature: tuple[int, int] | None = None
         self._auto_refresh_job: str | None = None
         self._history_canvas: tk.Canvas
         self._history_frame: tk.Frame
         self._history_window_id: int
+        self._history_body: tk.Frame
+        self._card_text_labels: list[tk.Label] = []
         self._build()
+        self.win.update_idletasks()
         self.refresh()
         self.hide()
         self._schedule_auto_refresh()
+
+    def _resolve_font_family(self) -> str:
+        try:
+            available_fonts = set(tkfont.families(self.root))
+        except tk.TclError:
+            available_fonts = set()
+        return "Inter" if "Inter" in available_fonts else "Segoe UI"
 
     def _center_window(self) -> None:
         self.win.update_idletasks()
         sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
         self.win.geometry(
-            f"{HOME_WIDTH}x{HOME_HEIGHT}+{(sw - HOME_WIDTH) // 2}+{(sh - HOME_HEIGHT) // 2}"
+            f"{self.window_width}x{self.window_height}+{(sw - self.window_width) // 2}+{(sh - self.window_height) // 2}"
         )
 
     def _build(self) -> None:
         shell = tk.Frame(self.win, bg=HOME_BG)
         shell.pack(fill="both", expand=True)
 
-        sidebar = tk.Frame(shell, bg=HOME_SIDEBAR, width=128)
+        topbar = tk.Frame(shell, bg=HOME_BG, height=HOME_TOPBAR_HEIGHT)
+        topbar.pack(side="top", fill="x")
+        topbar.pack_propagate(False)
+        self._bind_window_drag(topbar)
+        controls = tk.Frame(topbar, bg=HOME_BG)
+        controls.pack(side="right", fill="y")
+        self._make_window_control(controls, "minimize", self._minimize_window).pack(side="left")
+        self._make_window_control(controls, "maximize", self._toggle_maximize).pack(side="left")
+        self._make_window_control(controls, "close", self.hide).pack(side="left")
+
+        work = tk.Frame(shell, bg=HOME_BG)
+        work.pack(side="top", fill="both", expand=True)
+
+        sidebar = tk.Frame(work, bg=HOME_SIDEBAR, width=HOME_SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
-        tk.Label(
+        self._home_nav = tk.Canvas(
             sidebar,
-            text="MOVE\nYOUR\nLIPS",
+            width=62,
+            height=60,
             bg=HOME_SIDEBAR,
-            fg=FG,
-            justify="left",
-            font=("Segoe UI", 13, "bold"),
-        ).pack(anchor="w", padx=22, pady=(34, 34))
-        home_nav = RoundedPanel(
-            sidebar,
-            fill="#2b2730",
-            border="#2b2730",
+            bd=0,
+            highlightthickness=0,
         )
-        home_nav.pack(fill="x", padx=12)
-        tk.Label(
-            home_nav.content,
-            text="HOME",
-            bg="#2b2730",
-            fg=FG,
-            anchor="w",
-            padx=16,
-            pady=10,
-            font=("Segoe UI", 10, "bold"),
-        ).pack(fill="x")
-        main = tk.Frame(shell, bg=HOME_BG)
-        main.pack(side="left", fill="both", expand=True)
+        self._home_nav.place(x=18, y=0, width=62, height=60)
+        self._draw_home_nav()
+        self._home_nav.bind("<Button-1>", lambda _event: self.show())
 
-        header = tk.Frame(main, bg=HOME_BG)
-        header.pack(fill="x", padx=34, pady=(28, 20))
-        title_box = tk.Frame(header, bg=HOME_BG)
-        title_box.pack(side="left", fill="x", expand=True)
+        content_panel = FigmaContentPanel(
+            work,
+            fill=HOME_CONTENT,
+            radius=HOME_CORNER_RADIUS,
+        )
+        content_panel.pack(side="left", fill="both", expand=True)
+        self._content = content_panel.content
         tk.Label(
-            title_box,
-            text="Your words",
-            bg=HOME_BG,
-            fg=FG,
-            anchor="w",
-            font=("Segoe UI", 22, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            title_box,
-            text="Recent silent lip-reading results · Ctrl+R to refresh",
-            bg=HOME_BG,
-            fg=HOME_DIM,
-            anchor="w",
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(5, 0))
-        toolbar = tk.Frame(main, bg=HOME_BG)
-        toolbar.pack(fill="x", padx=34, pady=(0, 12))
-        tk.Label(
-            toolbar,
+            self._content,
             text="History",
-            bg=HOME_BG,
-            fg=FG,
+            bg=HOME_CONTENT,
+            fg=HOME_TEXT,
             anchor="w",
-            font=("Segoe UI", 12, "bold"),
-        ).pack(side="left")
-        actions = tk.Frame(toolbar, bg=HOME_BG)
-        actions.pack(side="right")
-        self._folder_button = tk.Button(
-            actions,
-            text="Open folder",
-            command=self._open_storage_folder,
-            bg="#2b2730",
-            fg=FG,
-            activebackground="#39333f",
-            activeforeground=FG,
-            relief="flat",
-            borderwidth=0,
-            padx=10,
-            pady=4,
-            font=("Segoe UI", 9),
-        )
-        self._folder_button.pack(side="left", padx=(0, 12))
-        tk.Label(
-            actions,
-            textvariable=self._count_var,
-            bg=HOME_BG,
-            fg=HOME_MUTED,
-            anchor="e",
-            font=("Segoe UI", 9),
-        ).pack(side="left")
+            font=(self.font_family, 22, "bold"),
+        ).place(x=HOME_CONTENT_INSET, y=16)
 
-        body = tk.Frame(main, bg=HOME_BG)
-        body.pack(fill="both", expand=True, padx=(30, 24), pady=(0, 24))
-        scrollbar = tk.Scrollbar(body, orient="vertical")
-        scrollbar.pack(side="right", fill="y")
+        body = tk.Frame(self._content, bg=HOME_CONTENT)
+        body.place(x=HOME_CONTENT_INSET, y=60)
+        self._history_body = body
+        self._content.bind("<Configure>", self._layout_content)
         self._history_canvas = tk.Canvas(
             body,
-            bg=HOME_BG,
+            bg=HOME_CONTENT,
             highlightthickness=0,
-            yscrollcommand=scrollbar.set,
         )
         self._history_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.configure(command=self._history_canvas.yview)
-        self._history_frame = tk.Frame(self._history_canvas, bg=HOME_BG)
+        self._history_frame = tk.Frame(self._history_canvas, bg=HOME_CONTENT)
         self._history_window_id = self._history_canvas.create_window(
             (0, 0),
             window=self._history_frame,
@@ -601,15 +765,140 @@ class HomeWindow:
         )
         self._history_canvas.bind(
             "<Configure>",
-            lambda event: self._history_canvas.itemconfigure(
-                self._history_window_id,
-                width=event.width,
-            ),
+            self._on_history_canvas_configure,
         )
         self._history_canvas.bind("<Enter>", self._enable_mousewheel)
         self._history_canvas.bind("<Leave>", self._disable_mousewheel)
         self.win.bind("<Control-r>", self._on_refresh_shortcut)
         self.win.bind("<Control-R>", self._on_refresh_shortcut)
+
+    def _draw_home_nav(self) -> None:
+        self._home_nav.delete("all")
+        self._home_nav.create_polygon(
+            rounded_rect_points(62, 60, 20),
+            fill=HOME_ACTIVE,
+            outline=HOME_ACTIVE,
+            smooth=False,
+        )
+        stroke = HOME_TEXT
+        self._home_nav.create_line(
+            19,
+            28,
+            31,
+            18,
+            43,
+            28,
+            fill=stroke,
+            width=2.4,
+            joinstyle="round",
+        )
+        self._home_nav.create_line(
+            22,
+            27,
+            22,
+            42,
+            40,
+            42,
+            40,
+            27,
+            fill=stroke,
+            width=2.4,
+            joinstyle="round",
+        )
+        self._home_nav.create_line(
+            28,
+            42,
+            28,
+            34,
+            34,
+            34,
+            34,
+            42,
+            fill=stroke,
+            width=2.2,
+            joinstyle="round",
+        )
+
+    def _make_window_control(
+        self,
+        parent: tk.Misc,
+        kind: str,
+        command,
+    ) -> tk.Canvas:
+        canvas = tk.Canvas(
+            parent,
+            width=46,
+            height=HOME_TOPBAR_HEIGHT,
+            bg=HOME_BG,
+            bd=0,
+            highlightthickness=0,
+        )
+        stroke = HOME_TEXT
+        if kind == "minimize":
+            canvas.create_line(17, 27, 29, 27, fill=stroke, width=2)
+        elif kind == "maximize":
+            canvas.create_rectangle(17, 17, 29, 29, outline=stroke, width=2)
+        else:
+            canvas.create_line(18, 18, 30, 30, fill=stroke, width=2)
+            canvas.create_line(30, 18, 18, 30, fill=stroke, width=2)
+        canvas.bind("<Button-1>", lambda _event: command())
+        return canvas
+
+    def _bind_window_drag(self, widget: tk.Misc) -> None:
+        widget.bind("<ButtonPress-1>", self._start_window_drag)
+        widget.bind("<B1-Motion>", self._drag_window)
+
+    def _start_window_drag(self, event: tk.Event) -> None:
+        if self._is_maximized:
+            return
+        self._drag_offset = (event.x_root - self.win.winfo_x(), event.y_root - self.win.winfo_y())
+
+    def _drag_window(self, event: tk.Event) -> None:
+        if self._is_maximized or self._drag_offset is None:
+            return
+        offset_x, offset_y = self._drag_offset
+        self.win.geometry(f"+{event.x_root - offset_x}+{event.y_root - offset_y}")
+
+    def _minimize_window(self) -> None:
+        self.hide()
+
+    def _toggle_maximize(self) -> None:
+        if self._is_maximized:
+            if self._normal_geometry is not None:
+                width, height, x, y = self._normal_geometry
+                self.win.geometry(f"{width}x{height}+{x}+{y}")
+            self._is_maximized = False
+            return
+        self._normal_geometry = (
+            self.win.winfo_width(),
+            self.win.winfo_height(),
+            self.win.winfo_x(),
+            self.win.winfo_y(),
+        )
+        self.win.geometry(
+            f"{self.win.winfo_screenwidth()}x{self.win.winfo_screenheight()}+0+0"
+        )
+        self._is_maximized = True
+
+    def _layout_content(self, event: tk.Event) -> None:
+        self._history_body.place_configure(
+            x=HOME_CONTENT_INSET,
+            y=60,
+            width=max(240, event.width - HOME_CONTENT_INSET * 2),
+            height=max(200, event.height - 60),
+        )
+
+    def _on_history_canvas_configure(self, event: tk.Event) -> None:
+        self._history_canvas.itemconfigure(
+            self._history_window_id,
+            width=event.width,
+        )
+        wraplength = max(240, event.width - 40)
+        for label in self._card_text_labels:
+            try:
+                label.configure(wraplength=wraplength)
+            except tk.TclError:
+                pass
 
     def _enable_mousewheel(self, _event: tk.Event) -> None:
         self.win.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -649,9 +938,8 @@ class HomeWindow:
             if startfile is None:
                 raise OSError("opening local folders is only supported on Windows")
             startfile(str(folder))
-            self._button_feedback(self._folder_button, "Opened", GREEN, "Open folder", FG)
         except OSError:
-            self._button_feedback(self._folder_button, "Open failed", RED, "Open folder", FG)
+            pass
 
     def _button_feedback(
         self,
@@ -679,9 +967,9 @@ class HomeWindow:
         try:
             pyperclip.copy(text)
         except Exception:
-            self._button_feedback(button, "Copy failed", RED, "Copy", HOME_MUTED)
+            self._button_feedback(button, "×", RED, "⧉", HOME_MUTED)
             return
-        self._button_feedback(button, "Copied", GREEN, "Copy", HOME_MUTED)
+        self._button_feedback(button, "✓", GREEN, "⧉", HOME_MUTED)
 
     def _read_history(self) -> list[dict[str, Any]]:
         if not self.history_path.exists():
@@ -709,17 +997,17 @@ class HomeWindow:
         self._history_signature = signature
         for child in self._history_frame.winfo_children():
             child.destroy()
+        self._card_text_labels.clear()
 
         entries = self._read_history()
-        self._count_var.set(f"{len(entries)} recognitions · stored locally")
         if not entries:
             tk.Label(
                 self._history_frame,
-                text="No recognition history yet\nHold Right Ctrl to make your first entry.",
-                bg=HOME_BG,
+                text="还没有识别记录\n按住 Right Ctrl 创建第一条记录",
+                bg=HOME_CONTENT,
                 fg=HOME_DIM,
                 justify="center",
-                font=("Segoe UI", 13),
+                font=(self.font_family, 16),
                 pady=80,
             ).pack(fill="x")
             return
@@ -732,78 +1020,71 @@ class HomeWindow:
             self._history_frame,
             fill=HOME_CARD,
             border=HOME_BORDER,
+            radius=HOME_CORNER_RADIUS,
+            border_width=0,
         )
-        card.pack(fill="x", padx=4, pady=(0, 12))
-        top = tk.Frame(card.content, bg=HOME_CARD)
-        top.pack(fill="x", padx=18, pady=(13, 0))
-        timestamp = str(entry.get("at", "")).replace("T", " ")[:19]
-        action = str(entry.get("output_action", "copied")).upper()
-        action_color = GREEN if action == "COPIED" else AMBER
-        tk.Label(
-            top,
-            text=timestamp or "Unknown time",
-            bg=HOME_CARD,
-            fg=HOME_DIM,
-            anchor="w",
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            top,
-            text=action,
-            bg=HOME_CARD,
-            fg=action_color,
-            anchor="e",
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="right")
-
+        card.pack(fill="x", pady=(0, 20))
         text = str(entry.get("text", "")).strip() or "(empty result)"
-        tk.Label(
+        body_label = tk.Label(
             card.content,
             text=text,
             bg=HOME_CARD,
-            fg=FG,
+            fg=HOME_TEXT,
             anchor="w",
             justify="left",
-            wraplength=700,
-            font=("Segoe UI", 12),
-        ).pack(fill="x", padx=18, pady=(10, 8))
+            wraplength=max(240, self._history_canvas.winfo_width() - 40),
+            font=(self.font_family, 22),
+        )
+        body_label.pack(fill="x", padx=20, pady=(20, 22))
+        self._card_text_labels.append(body_label)
 
-        metadata: list[str] = []
-        if entry.get("latency_seconds") is not None:
-            try:
-                metadata.append(f"{float(entry['latency_seconds']):.1f}s")
-            except (TypeError, ValueError):
-                pass
-        if entry.get("model_frames") is not None:
-            metadata.append(f"{entry['model_frames']} frames")
-        metadata.append("Right Ctrl · local")
-        footer = tk.Frame(card.content, bg=HOME_CARD)
-        footer.pack(fill="x", padx=18, pady=(0, 13))
+        footer = tk.Frame(card.content, bg=HOME_CARD, height=32)
+        footer.pack(fill="x", padx=20, pady=(0, 20))
+        footer.pack_propagate(False)
+        raw_timestamp = str(entry.get("at", ""))
+        if "T" in raw_timestamp:
+            timestamp = raw_timestamp.split("T", 1)[1][:5]
+        else:
+            timestamp = raw_timestamp[-5:]
         tk.Label(
             footer,
-            text=" · ".join(metadata),
+            text=timestamp or "--:--",
             bg=HOME_CARD,
-            fg=HOME_MUTED,
+            fg=HOME_DIM,
             anchor="w",
-            font=("Segoe UI", 9),
+            font=(self.font_family, 16),
         ).pack(side="left", fill="x", expand=True)
+
+        actions = tk.Frame(footer, bg=HOME_ACTION)
         copy_button = tk.Button(
-            footer,
-            text="Copy",
-            bg=HOME_CARD,
+            actions,
+            text="⧉",
+            bg=HOME_ACTION,
             fg=HOME_MUTED,
-            activebackground=HOME_CARD,
-            activeforeground=FG,
+            activebackground=HOME_ACTION,
+            activeforeground=HOME_TEXT,
             relief="flat",
             borderwidth=0,
             padx=8,
             pady=2,
-            font=("Segoe UI", 9, "bold"),
+            font=(self.font_family, 14, "bold"),
         )
         copy_button.configure(
             command=lambda value=text, button=copy_button: self._copy_entry(value, button)
         )
-        copy_button.pack(side="right")
+        copy_button.pack(side="left")
+
+        def show_actions(_event: tk.Event | None = None) -> None:
+            if not actions.winfo_ismapped():
+                actions.pack(side="right")
+
+        def hide_actions(_event: tk.Event | None = None) -> None:
+            if actions.winfo_ismapped():
+                actions.pack_forget()
+
+        for widget in (card, card.content, body_label, footer, actions):
+            widget.bind("<Enter>", show_actions, add="+")
+            widget.bind("<Leave>", hide_actions, add="+")
 
     def show(self, raise_window: bool = True) -> None:
         self.refresh()
@@ -999,7 +1280,7 @@ class HudApp:
         self.root.bind("<Escape>", lambda _event: self.cancel_or_quit())
 
     def run(self) -> None:
-        self.hud.show("loading", "Move Your Lips", "Loading the lip-reading model…")
+        self.hud.show("loading", "加载中", "正在加载识别模型")
         self._install_keyboard()
         self.root.after(25, self._pump_ui)
         self.root.after(50, self._poll_futures)
@@ -1057,11 +1338,8 @@ class HudApp:
         if self.home is None:
             self.home = HomeWindow(self.root, self.history_path)
         self.mode = "ready"
-        self.hud.show("done", "Ready", f"Hold {TRIGGER_KEY_LABEL} and mouth your words", hide_after=2.5)
-        if not self.setup_path.exists():
-            self.root.after(250, self.show_setup)
-        else:
-            self.show_home()
+        self.hud.hide()
+        self.show_home()
 
     def show_setup(self) -> None:
         if self.setup_window is not None or self.exit_requested:
@@ -1133,7 +1411,9 @@ class HudApp:
             return
         if self.exit_requested or self.setup_window is not None:
             return
-        if self.mode in ("ready", "done", "error"):
+        if self.mode in ("ready", "result", "error"):
+            self.mode = "ready"
+            self.hud.hide()
             self.show_home(raise_window=raise_window)
 
     def _finish_setup(self) -> None:
@@ -1146,10 +1426,10 @@ class HudApp:
             self.setup_window.destroy()
             self.setup_window = None
         self.show_home()
-        self.hud.show("done", "Ready", f"Hold {TRIGGER_KEY_LABEL} and mouth your words", hide_after=2.5)
+        self.hud.hide()
 
     def begin_recording(self) -> None:
-        if self.mode not in ("ready", "done", "error") or self.setup_window is not None:
+        if self.mode not in ("ready", "result", "error") or self.setup_window is not None:
             return
         if self.recognizer is None or self.camera is None:
             return
@@ -1160,15 +1440,16 @@ class HudApp:
         self.live_text = ""
         self.final_text = ""
         self.last_error = ""
-        self.hud.show("listening", "Listening", "Starting camera…")
+        self.mode = "starting_camera"
+        self.hud.show("starting_camera", "启动摄像头", "正在打开摄像头")
         self.root.after(int(self.args.preview_interval * 1000), self._queue_preview)
 
     def begin_tail(self) -> None:
-        if self.mode != "listening" or self.active_rec is None or self.tailing:
+        if self.mode not in ("starting_camera", "listening") or self.active_rec is None or self.tailing:
             return
         self.tailing = True
-        self.mode = "reading"
-        self.hud.show("reading", "Reading your lips", self.live_text)
+        self.mode = "processing"
+        self.hud.show("processing", "识别修改中", "正在识别并修改内容")
         session = self.session
         self.root.after(int(max(0.0, self.args.tail_seconds) * 1000), lambda: self.finish_recording(session))
 
@@ -1181,7 +1462,7 @@ class HudApp:
         if rec is None:
             self._show_error("NO RECORDING - try again")
             return
-        self.hud.show("reading", "Reading your lips", "Please wait…")
+        self.hud.show("processing", "识别修改中", "正在识别并修改内容")
         if self.recognizer is None:
             self._show_error("MODEL NOT READY")
             return
@@ -1224,7 +1505,8 @@ class HudApp:
                 try:
                     text, _latency, _frames = future.result()
                     if session == self.session and self.mode == "listening" and text:
-                        self.hud.set_text(text.lower())
+                        self.live_text = text
+                        self.hud.set_text(f"实时识别：{text}")
                 except Exception:
                     # A live preview is deliberately non-blocking; the final
                     # recognition remains the source of truth.
@@ -1262,15 +1544,15 @@ class HudApp:
                     )
                     if self.home is not None:
                         self.home.refresh()
-                    self.mode = "done"
+                    self.mode = "result"
                     self.hud.show(
-                        "done",
-                        "Pasted" if self.args.paste else "Copied",
-                        text,
-                        hide_after=6.0,
+                        "result",
+                        "完成",
+                        f"识别结果：{text}",
+                        hide_after=3.0,
                     )
                     self.root.after(
-                        6000,
+                        3000,
                         lambda session=session: self._restore_home(session, raise_window=False),
                     )
                     print(f"[mvp-hud] {output_action}: {text}")
@@ -1305,7 +1587,10 @@ class HudApp:
         try:
             while True:
                 kind, payload = self.ui_queue.get_nowait()
-                if kind == "frame" and self.mode == "listening":
+                if kind == "frame" and self.mode in ("starting_camera", "listening"):
+                    if self.mode == "starting_camera":
+                        self.mode = "listening"
+                        self.hud.show("listening", "正在录制", self.live_text)
                     self.hud.set_frame(payload)
                 elif kind == "error":
                     self._show_error(str(payload))
@@ -1321,18 +1606,18 @@ class HudApp:
         if self.camera is not None:
             self.camera.cancel()
         self.active_rec = None
-        self.hud.show("error", "Error", message, hide_after=4.0)
+        self.hud.show("error", "错误", message, hide_after=4.0)
         self.root.after(4000, lambda: self._restore_home(raise_window=False))
 
     def cancel_or_quit(self) -> None:
-        if self.mode in ("listening", "reading"):
+        if self.mode in ("starting_camera", "listening", "processing"):
             self.session += 1
             self.tailing = False
             if self.camera is not None:
                 self.camera.cancel()
             self.active_rec = None
             self.mode = "ready"
-            self.hud.show("error", "Cancelled", "", hide_after=1.0)
+            self.hud.show("error", "已取消", "", hide_after=1.0)
             self.root.after(1000, lambda: self._restore_home(raise_window=False))
             return
         self.exit_requested = True
@@ -1409,7 +1694,23 @@ def main() -> int:
         return 0
 
     print(f"[mvp-hud] starting resident bottom HUD; camera is closed until {TRIGGER_KEY_LABEL}")
-    HudApp(args).run()
+    try:
+        from ui.qt_frontend import QtHudApp
+    except ModuleNotFoundError as exc:
+        if exc.name == "PySide6":
+            raise RuntimeError(
+                "The Home/HUD interface now requires PySide6. "
+                "Install it with the project Python: python -m pip install -r requirements-ui.txt"
+            ) from exc
+        raise
+
+    QtHudApp(
+        args,
+        camera_worker_cls=CameraWorker,
+        preview_renderer=mouth_hud_view,
+        trigger_key=TRIGGER_KEY,
+        trigger_key_label=TRIGGER_KEY_LABEL,
+    ).run()
     return 0
 
 

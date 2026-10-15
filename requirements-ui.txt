@@ -1,0 +1,2 @@
+# Qt for Python bindings used by the QML Home and HUD interface.
+PySide6>=6.8,<6.9

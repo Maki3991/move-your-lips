@@ -94,6 +94,17 @@
 
 MVP v0.2 暂不做：系统级输入法、默认自动粘贴、音频保存、外部 LLM 润色、多人场景和准确率承诺。
 
+## Home / HUD 本地界面
+
+Home 页面和底部状态 HUD 使用 PySide6 + QML；摄像头采集、识别和历史记录仍由 Python 逻辑处理。首次运行前，在启动脚本使用的 Python 环境中安装界面依赖，然后用现有启动脚本运行：
+
+```powershell
+D:\cnvsrc-env\python.exe -m pip install -r requirements-ui.txt
+.\scripts\run_lip_input_mvp.ps1
+```
+
+启动后先显示“正在加载识别模型”；模型就绪后打开 Home。Home 默认以约 `1000×650` 的紧凑尺寸打开，可拖动右下角调整窗口大小，也可以用 `Ctrl +` / `Ctrl -` 调整、`Ctrl + 0` 恢复默认尺寸。按住右 Ctrl 开始录制，松开后进入识别，结果会复制到剪贴板并写入本地历史。鼠标悬停历史卡片可复制或删除（删除前会确认）；关闭/最小化 Home 只会隐藏窗口，Windows 任务栏通知区域会保留 Move Your Lips 图标，点击图标或右键选择“显示 Home”即可重新打开；只有托盘菜单的“退出 Move Your Lips”或启动它的终端 `Ctrl+C` 才会结束常驻程序。
+
 ## 文档
 
 - [Design Thinking 记录：问题、POV、HMW 与 Prototype](docs/design-thinking.md)

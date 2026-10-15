@@ -4,3 +4,4 @@ test-videos
 outputs/mvp
 scripts/__pycache__
 outputs
+scripts/ui/__pycache__/
