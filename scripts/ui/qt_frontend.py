@@ -268,7 +268,8 @@ class AppBridge(QObject):
         self._notice = ""
         self._adaptation: dict[str, Any] = {
             "available": False, "count": 0, "total": 24, "phrase": "", "session": "",
-            "training": False, "message": "", "beforeCer": -1, "afterCer": -1,
+            "training": False, "recording": False, "processing": False, "message": "",
+            "beforeCer": -1, "afterCer": -1,
             "candidate": "", "active": "", "loaded": "尚未载入",
         }
 
@@ -634,6 +635,17 @@ class QtHudApp(QObject):
         self.adaptation_root = PROJECT_ROOT / "outputs" / "mvp" / "personal_adaptation"
         self.adaptation_current = self.adaptation_root / "current-session.json"
         practice_set = getattr(args, "practice_set", None)
+        self.practice_cli_session = bool(practice_set)
+        self.practice_phrase_set = (
+            Path(practice_set) if practice_set
+            else PROJECT_ROOT / "docs" / "personal-adaptation-phrases-v0.1.json"
+        )
+        try:
+            self.practice_template = json.loads(
+                self.practice_phrase_set.read_text(encoding="utf-8")
+            ).get("phrases", [])
+        except (OSError, ValueError):
+            self.practice_template = []
         if practice_set:
             if args.model != "cnvsrc":
                 raise ValueError("--practice-set is only supported with --model cnvsrc")
@@ -787,8 +799,18 @@ class QtHudApp(QObject):
                     report = json.loads(report_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     pass
-        current = self.practice_phrases[self.practice_index] if self.practice_index < len(self.practice_phrases) else None
+        if self.practice_index < len(self.practice_phrases):
+            current = self.practice_phrases[self.practice_index]
+        elif not self.practice_session_id and self.practice_index == 0 and self.practice_template:
+            current = self.practice_template[0]
+        else:
+            current = None
         candidate = Path(report["candidate_checkpoint"]) if report and report.get("candidate_checkpoint") else None
+        if not message:
+            if self.args.model != "cnvsrc":
+                message = "当前个人适配流程仅支持 CNVSRC 模型。"
+            elif self.recognizer is None or self.camera is None:
+                message = "正在加载识别模型，完成后即可开始采集。"
         active_config = PROJECT_ROOT / "outputs" / "mvp" / "active-model.json"
         active_path = ""
         if active_config.exists():
@@ -797,12 +819,18 @@ class QtHudApp(QObject):
             except (OSError, ValueError, KeyError):
                 pass
         self.bridge.set_adaptation({
-            "available": self.args.model == "cnvsrc",
+            "available": (
+                self.args.model == "cnvsrc"
+                and self.recognizer is not None
+                and self.camera is not None
+            ),
             "count": self.practice_index,
             "total": 24,
             "phrase": current["text"] if current else "",
             "session": self.practice_session_id,
             "training": self.adaptation_process is not None and self.adaptation_process.poll() is None,
+            "recording": self.mode in ("starting_camera", "listening"),
+            "processing": self.mode == "processing",
             "message": message,
             "beforeCer": round(report["heldout_before"]["cer"] * 100, 1) if report else -1,
             "afterCer": round(report["heldout_after"]["cer"] * 100, 1) if report else -1,
@@ -823,7 +851,7 @@ class QtHudApp(QObject):
             self._update_adaptation("请继续当前的 24 句采集；重新开始会舍弃当前进度。")
             return
         try:
-            self._new_practice_session(PROJECT_ROOT / "docs" / "personal-adaptation-phrases-v0.1.json")
+            self._new_practice_session(self.practice_phrase_set)
             self._update_adaptation("已创建本地采集。点击录制，或按右 Ctrl 开始。")
             self._show_practice_prompt()
         except (OSError, ValueError) as exc:
@@ -831,9 +859,15 @@ class QtHudApp(QObject):
 
     @Slot()
     def _record_adaptation(self) -> None:
-        if not self.practice_phrases or self.practice_index >= 24:
-            self._update_adaptation("请先创建采集，或开始训练。")
-        elif self.mode in ("starting_camera", "listening"):
+        # The main page action creates the local session on first use and
+        # immediately records its first phrase.
+        if not self.practice_phrases:
+            self._start_adaptation()
+            if not self.practice_phrases:
+                return
+        if self.practice_index >= 24:
+            return
+        if self.mode in ("starting_camera", "listening"):
             self.begin_tail()
         elif self.mode in ("ready", "result", "error"):
             self.begin_recording()
@@ -1004,6 +1038,15 @@ class QtHudApp(QObject):
         if key != self.trigger_key or self.key_down:
             return
         self.key_down = True
+        adaptation_view = (
+            self.home_window is not None
+            and self.home_window.isVisible()
+            and bool(self.home_window.property("adaptationPage"))
+        )
+        if adaptation_view:
+            if self.practice_index < 24:
+                self._record_adaptation()
+            return
         if self.mode in ("starting_camera", "listening"):
             self.begin_tail()
         elif self.mode in ("ready", "result", "error"):
@@ -1104,6 +1147,7 @@ class QtHudApp(QObject):
         self.mode = "model_error"
         self.last_error = message
         self.bridge.set_home_visible(True)
+        self._update_adaptation("识别模型未能加载，暂时无法录制。")
         self.bridge.set_hud("error", "错误", message)
 
     def begin_recording(self) -> None:
@@ -1112,9 +1156,19 @@ class QtHudApp(QObject):
         if self.recognizer is None or self.camera is None:
             return
         self.session += 1
+        adaptation_view = (
+            self.practice_cli_session
+            or (
+                self.home_window is not None
+                and self.home_window.isVisible()
+                and bool(self.home_window.property("adaptationPage"))
+            )
+        )
         phrase = (
             self.practice_phrases[self.practice_index]
-            if self.practice_phrases and self.practice_index < len(self.practice_phrases)
+            if adaptation_view
+            and self.practice_phrases
+            and self.practice_index < len(self.practice_phrases)
             else None
         )
         self._active_practice_phrase = phrase
@@ -1136,6 +1190,7 @@ class QtHudApp(QObject):
             )
         else:
             self.bridge.set_hud("starting_camera", "启动摄像头", "正在打开摄像头")
+        self._update_adaptation()
         QTimer.singleShot(int(self.args.preview_interval * 1000), self._queue_preview)
 
     def begin_tail(self) -> None:
@@ -1144,6 +1199,7 @@ class QtHudApp(QObject):
         self.tailing = True
         self.mode = "processing"
         self.bridge.set_hud("processing", "识别修改中", "正在识别并修改内容")
+        self._update_adaptation()
         session = self.session
         QTimer.singleShot(
             int(max(0.0, self.args.tail_seconds) * 1000),
@@ -1505,7 +1561,7 @@ class QtHudApp(QObject):
 
                 if result.get("practice_sample_file"):
                     self.practice_index += 1
-                    self._update_adaptation("这一句已保存。继续下一句。" if self.practice_index < 24 else "24 句已保存，可以开始训练。")
+                    self._update_adaptation("24 句已保存，可以开始训练。" if self.practice_index >= 24 else "")
 
                 self._active_media_file = media_file
                 media_status = str(result.get("media_status") or "not_available")
@@ -1785,6 +1841,7 @@ class QtHudApp(QObject):
         self.session += 1
         self.tailing = False
         self.last_error = message
+        self._update_adaptation(message)
         if self.camera is not None:
             self.camera.cancel()
         self.active_rec = None
@@ -1798,6 +1855,7 @@ class QtHudApp(QObject):
             return
         if self.mode in ("ready", "result", "error"):
             self.mode = "ready"
+            self._update_adaptation()
             if self.practice_phrases:
                 self._show_practice_prompt()
             else:

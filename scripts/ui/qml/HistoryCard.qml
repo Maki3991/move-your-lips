@@ -249,9 +249,6 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: moreMenu.popup()
-                        ToolTip.visible: containsMouse
-                        ToolTip.text: "更多"
-                        ToolTip.delay: 450
                     }
                     Menu {
                         id: moreMenu

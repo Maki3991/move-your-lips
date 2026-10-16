@@ -226,12 +226,16 @@ ApplicationWindow {
 
             Rectangle {
                 id: homeButton
-                x: 10
+                x: 13
                 y: 26
                 width: 50
                 height: 50
                 radius: 20
-                color: homeWindow.adaptationPage ? "transparent" : "#eaf4f1"
+                color: !homeWindow.adaptationPage || homeButtonMouse.containsMouse
+                       ? "#eaf4f1" : "transparent"
+                Behavior on color {
+                    ColorAnimation { duration: 180; easing.type: Easing.OutCubic }
+                }
 
                 Image {
                     anchors.centerIn: parent
@@ -245,7 +249,9 @@ ApplicationWindow {
                 }
 
                 MouseArea {
+                    id: homeButtonMouse
                     anchors.fill: parent
+                    hoverEnabled: true
                     onClicked: {
                         homeWindow.adaptationPage = false
                         bridge.showHome()
@@ -254,25 +260,34 @@ ApplicationWindow {
             }
 
             Rectangle {
-                x: 10
+                id: adaptationNavigationButton
+                objectName: "adaptationNavigationButton"
+                x: 13
                 y: 90
                 width: 50
                 height: 50
+                Accessible.name: "个人适配"
                 radius: 20
-                color: homeWindow.adaptationPage ? "#eaf4f1" : "transparent"
-                Text {
+                color: homeWindow.adaptationPage || adaptationButtonMouse.containsMouse
+                       ? "#eaf4f1" : "transparent"
+                Behavior on color {
+                    ColorAnimation { duration: 180; easing.type: Easing.OutCubic }
+                }
+                Image {
                     anchors.centerIn: parent
-                    text: "24"
-                    color: "#286f70"
-                    font.pixelSize: 17
-                    font.bold: true
+                    source: Qt.resolvedUrl("../assets/myl-v2-mic-compact.svg")
+                    width: 18
+                    height: 27
+                    sourceSize: Qt.size(18, 27)
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    antialiasing: true
                 }
                 MouseArea {
+                    id: adaptationButtonMouse
                     anchors.fill: parent
-                    onClicked: homeWindow.adaptationPage = true
                     hoverEnabled: true
-                    ToolTip.visible: containsMouse
-                    ToolTip.text: "个人适配"
+                    onClicked: homeWindow.adaptationPage = true
                 }
             }
         }
@@ -457,152 +472,431 @@ ApplicationWindow {
 
             Flickable {
                 id: adaptationContent
+                objectName: "adaptationContent"
                 visible: homeWindow.adaptationPage
                 width: Math.min(920, parent.width - 48)
                 height: parent.height
                 anchors.horizontalCenter: parent.horizontalCenter
                 clip: true
-                contentHeight: adaptationColumn.implicitHeight + 90
                 boundsBehavior: Flickable.StopAtBounds
+                contentHeight: adaptationColumn.y + adaptationColumn.implicitHeight + 24
 
                 Column {
                     id: adaptationColumn
                     x: 0
-                    y: 40
+                    y: adaptationContent.height < 760 ? 24 : 40
                     width: parent.width
-                    spacing: 20
+                    spacing: 0
 
-                    Text {
-                        text: "HOME  /  PERSONAL ADAPTATION"
-                        color: "#286f70"
-                        font.pixelSize: 11
-                        font.bold: true
-                    }
-                    Text {
-                        text: "个人适配"
-                        color: "#26383a"
-                        font.pixelSize: 30
-                        font.bold: true
-                    }
-                    Text {
+                    Item {
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        text: "读完 24 句话，程序用其中 18 句调整识别模型，再用另外 6 句比较效果。结果只保存在本机；准确率不保证提高。"
-                        color: "#64777a"
-                        font.pixelSize: 14
+                        height: 55
+
+                        Column {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 5
+                            Text {
+                                text: "HOME  /  PERSONAL ADAPTATION"
+                                color: "#286f70"
+                                font.family: "Inter"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                text: "个人适配"
+                                color: "#26383a"
+                                font.family: "Inter"
+                                font.pixelSize: 30
+                                font.weight: Font.DemiBold
+                                lineHeightMode: Text.FixedHeight
+                                lineHeight: 38
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 188
+                            height: 42
+                            radius: 12
+                            color: "#eaf4f1"
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                Text {
+                                    text: "24 句"
+                                    color: "#286f70"
+                                    font.family: "Inter"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                }
+                                Text {
+                                    text: "训练 + 验证"
+                                    color: "#64777a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 13
+                                }
+                            }
+                        }
                     }
+
+                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 24 }
+                    Rectangle { width: parent.width; height: 1; color: "#dee8e5" }
+                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 24 }
+
                     Rectangle {
+                        id: adaptationProgressCard
                         width: parent.width
-                        height: 160
+                        height: 82
                         radius: 16
                         color: "#ffffff"
                         border.color: "#dee8e5"
+                        border.width: 1
+
+                        Row {
+                            x: 23
+                            y: 16
+                            width: parent.width - 46
+                            height: 20
+                            Text {
+                                width: parent.width / 2
+                                text: "24 句采集进度"
+                                color: "#26383a"
+                                font.family: "Inter"
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            Text {
+                                width: parent.width / 2
+                                text: ("0" + Math.min(24, Math.max(1, bridge.adaptation.count + 1))).slice(-2) + " / 24"
+                                color: "#286f70"
+                                font.family: "Inter"
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+
+                        Rectangle {
+                            id: adaptationProgressTrack
+                            x: 23
+                            y: 50
+                            width: parent.width - 46
+                            height: 6
+                            radius: 3
+                            color: "#eaf4f1"
+                            Rectangle {
+                                width: parent.width * Math.min(24, Math.max(1, bridge.adaptation.count + 1)) / 24
+                                height: parent.height
+                                radius: 3
+                                color: "#286f70"
+                            }
+                        }
+                    }
+
+                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 113
+                        radius: 16
+                        color: "#ffffff"
+                        border.color: "#dee8e5"
+                        border.width: 1
                         Column {
-                            anchors.fill: parent
-                            anchors.margins: 22
+                            x: 23
+                            y: 20
+                            width: parent.width - 46
                             spacing: 14
                             Text {
-                                text: "采集进度  " + bridge.adaptation.count + " / 24"
-                                color: "#26383a"
-                                font.pixelSize: 18
-                                font.bold: true
+                                text: bridge.adaptation.count >= 24
+                                      ? "24 句采集已完成"
+                                      : "请按顺序朗读 · 第 " + Math.min(24, bridge.adaptation.count + 1) + " 句"
+                                color: "#64777a"
+                                font.family: "Inter"
+                                font.pixelSize: 12
                             }
                             Text {
                                 width: parent.width
-                                wrapMode: Text.WordWrap
                                 text: bridge.adaptation.phrase.length > 0
-                                      ? "第 " + (bridge.adaptation.count + 1) + " 句：" + bridge.adaptation.phrase
-                                      : (bridge.adaptation.session.length > 0 ? "本轮采集已完成" : "还没有创建采集")
-                                color: "#286f70"
-                                font.pixelSize: 17
-                            }
-                            Text {
-                                text: "点击录制或按右 Ctrl 开始，再点一次结束；一人、正面、光线稳定。"
-                                color: "#64777a"
-                                font.pixelSize: 12
+                                      ? bridge.adaptation.phrase
+                                      : (bridge.adaptation.count >= 24 ? "可以开始训练并比较效果" : "请先等待识别模型就绪")
+                                color: "#26383a"
+                                font.family: "Inter"
+                                font.pixelSize: 20
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
                             }
                         }
                     }
+
+                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
+
                     Row {
-                        spacing: 12
-                        Button {
-                            text: bridge.adaptation.session.length > 0 ? "新建下一轮" : "创建 24 句采集"
-                            enabled: bridge.adaptation.available && !bridge.adaptation.training
-                            onClicked: bridge.startAdaptation()
-                        }
-                        Button {
-                            text: "录制 / 结束当前句"
-                            enabled: bridge.adaptation.available && bridge.adaptation.session.length > 0
-                                     && bridge.adaptation.count < 24 && !bridge.adaptation.training
-                            onClicked: bridge.recordAdaptation()
-                        }
-                        Button {
-                            text: bridge.adaptation.training ? "训练中…" : "训练并比较"
-                            enabled: bridge.adaptation.available && bridge.adaptation.count === 24
-                                     && !bridge.adaptation.training && bridge.adaptation.beforeCer < 0
-                            onClicked: bridge.trainAdaptation()
-                        }
-                    }
-                    Text {
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        text: bridge.adaptation.message
-                        visible: text.length > 0
-                        color: "#286f70"
-                        font.pixelSize: 13
+                        spacing: 14
+
+                        Rectangle {
+                            width: (parent.width - 14) / 2
+                            height: 144
+                            radius: 16
+                            color: "#ffffff"
+                            border.color: "#dee8e5"
+                            border.width: 1
+                            Column {
+                                x: 23
+                                y: 20
+                                width: parent.width - 46
+                                spacing: 12
+                                Text {
+                                    text: "录制提示"
+                                    color: "#26383a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: "保持正面、光线稳定；按右 Ctrl 开始；成功保存后会显示下一句。"
+                                    color: "#64777a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    text: "嘴部样本与训练结果保存在本机。"
+                                    color: "#286f70"
+                                    font.family: "Inter"
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: (parent.width - 14) / 2
+                            height: 144
+                            radius: 16
+                            color: "#ffffff"
+                            border.color: "#dee8e5"
+                            border.width: 1
+                            Column {
+                                x: 23
+                                y: 20
+                                width: parent.width - 46
+                                spacing: 15
+                                Text {
+                                    text: "这 24 句如何使用"
+                                    color: "#26383a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                }
+                                Row {
+                                    width: parent.width
+                                    spacing: 12
+                                    Rectangle {
+                                        width: (parent.width - 12) / 2
+                                        height: 42
+                                        radius: 10
+                                        color: "#eaf4f1"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "18 句用于训练"
+                                            color: "#286f70"
+                                            font.family: "Inter"
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: (parent.width - 12) / 2
+                                        height: 42
+                                        radius: 10
+                                        color: "#ffffff"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "6 句只做验证"
+                                            color: "#286f70"
+                                            font.family: "Inter"
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
+
+                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
+
                     Rectangle {
                         width: parent.width
-                        height: 165
+                        height: 94
                         radius: 16
                         color: "#ffffff"
                         border.color: "#dee8e5"
+                        border.width: 1
+
+                        Button {
+                            id: adaptationMainAction
+                            x: 23
+                            y: 24
+                            width: 180
+                            height: 46
+                            padding: 0
+                            enabled: bridge.adaptation.available
+                                     && !bridge.adaptation.training
+                                     && !bridge.adaptation.processing
+                                     && (bridge.adaptation.count < 24 || bridge.adaptation.beforeCer < 0)
+                            background: Rectangle {
+                                radius: 12
+                                color: adaptationMainAction.enabled ? "#eaf4f1" : "#f1f5f4"
+                            }
+                            contentItem: Text {
+                                text: bridge.adaptation.training
+                                      ? "正在训练…"
+                                      : bridge.adaptation.processing
+                                        ? "正在识别…"
+                                        : bridge.adaptation.recording
+                                          ? "结束当前句"
+                                          : bridge.adaptation.count >= 24
+                                            ? (bridge.adaptation.beforeCer >= 0 ? "本轮已完成" : "训练并比较")
+                                            : "开始录制"
+                                color: "#286f70"
+                                font.family: "Inter"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                if (bridge.adaptation.count >= 24)
+                                    bridge.trainAdaptation()
+                                else
+                                    bridge.recordAdaptation()
+                            }
+                        }
+
                         Column {
-                            anchors.fill: parent
-                            anchors.margins: 22
-                            spacing: 12
+                            x: 217
+                            y: 22
+                            width: parent.width - 240
+                            spacing: 4
                             Text {
-                                text: "留出句比较（6 句）"
-                                color: "#26383a"
-                                font.pixelSize: 18
-                                font.bold: true
+                                width: parent.width
+                                text: bridge.adaptation.recording
+                                      ? "正在录制；再次点击按钮或按右 Ctrl 结束"
+                                      : "也可按右 Ctrl 开始 / 结束"
+                                color: "#64777a"
+                                font.family: "Inter"
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
                             }
                             Text {
-                                text: bridge.adaptation.beforeCer >= 0
-                                      ? "原模型字符错误率 " + bridge.adaptation.beforeCer + "%  →  调整后 " + bridge.adaptation.afterCer + "%"
-                                      : "完成训练后显示比较结果"
+                                width: parent.width
+                                text: bridge.adaptation.count >= 24
+                                      ? (bridge.adaptation.beforeCer >= 0
+                                         ? "已用 6 句留出数据完成比较"
+                                         : "录完 24 句后训练，再用 6 句留出数据比较效果")
+                                      : "录完 24 句后训练，再用 6 句留出数据比较效果"
                                 color: "#64777a"
-                                font.pixelSize: 14
-                            }
-                            Text {
-                                text: bridge.adaptation.candidate.length > 0
-                                      ? "留出句指标改善，已生成候选模型；可手动启用。"
-                                      : "仅当留出句字符错误率下降时才保存候选模型。"
-                                color: "#64777a"
-                                font.pixelSize: 13
+                                font.family: "Inter"
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
                             }
                         }
                     }
-                    Row {
-                        spacing: 12
-                        Button {
-                            text: "启用个人模型（重启后）"
-                            enabled: bridge.adaptation.candidate.length > 0 && !bridge.adaptation.training
-                            onClicked: bridge.activateAdaptation()
-                        }
-                        Button {
-                            text: "恢复原模型（重启后）"
-                            enabled: bridge.adaptation.active.length > 0
-                            onClicked: bridge.resetAdaptationModel()
-                        }
-                    }
+
                     Text {
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        text: "本次已加载：" + bridge.adaptation.loaded + "；下次默认启动："
-                              + (bridge.adaptation.active.length > 0 ? "个人模型" : "原模型")
-                        color: "#64777a"
+                        visible: bridge.adaptation.message.length > 0
+                        text: bridge.adaptation.message
+                        color: "#286f70"
+                        font.family: "Inter"
                         font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Column {
+                        width: parent.width
+                        visible: bridge.adaptation.count >= 24
+                        spacing: 12
+
+                        Rectangle {
+                            width: parent.width
+                            height: 136
+                            radius: 16
+                            color: "#ffffff"
+                            border.color: "#dee8e5"
+                            border.width: 1
+                            Column {
+                                x: 23
+                                y: 20
+                                width: parent.width - 46
+                                spacing: 10
+                                Text {
+                                    text: "留出句比较（6 句）"
+                                    color: "#26383a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: bridge.adaptation.beforeCer >= 0
+                                          ? "原模型字符错误率 " + bridge.adaptation.beforeCer + "%  →  调整后 " + bridge.adaptation.afterCer + "%"
+                                          : "训练完成后显示留出句比较结果"
+                                    color: "#64777a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: bridge.adaptation.candidate.length > 0
+                                          ? "留出句指标改善，已生成候选模型；可手动启用。"
+                                          : (bridge.adaptation.beforeCer >= 0
+                                             ? "留出句没有改善，原模型仍为默认模型。"
+                                             : "只有留出句字符错误率下降时才保存候选模型。")
+                                    color: "#64777a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
+                        Row {
+                            spacing: 12
+                            Button {
+                                text: "启用个人模型（重启后）"
+                                enabled: bridge.adaptation.candidate.length > 0 && !bridge.adaptation.training
+                                onClicked: bridge.activateAdaptation()
+                            }
+                            Button {
+                                text: "恢复原模型（重启后）"
+                                enabled: bridge.adaptation.active.length > 0
+                                onClicked: bridge.resetAdaptationModel()
+                            }
+                            Button {
+                                text: "新建下一轮"
+                                enabled: bridge.adaptation.count >= 24 && !bridge.adaptation.training
+                                onClicked: bridge.startAdaptation()
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "本次已加载：" + bridge.adaptation.loaded + "；下次默认启动："
+                                  + (bridge.adaptation.active.length > 0 ? "个人模型" : "原模型")
+                            color: "#64777a"
+                            font.family: "Inter"
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
             }
