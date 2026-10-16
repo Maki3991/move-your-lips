@@ -1,2 +1,6 @@
 # Qt for Python bindings used by the QML Home and HUD interface.
 PySide6>=6.8,<6.9
+Pillow==9.4.0
+pynput==1.8.2
+pyperclip==1.11.0
+editdistance==0.8.1

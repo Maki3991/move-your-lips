@@ -35,11 +35,28 @@ from pynput import keyboard
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VSR_ROOT = Path(
-    r"D:\Softwares\Programming Projects\_githubs\CNVSRC2025\VSR"
-)
+DEFAULT_VSR_ROOT = PROJECT_ROOT / "third_party" / "CNVSRC2025" / "VSR"
 DEFAULT_CHECKPOINT_NAME = "model_avg_cncvs_2_3_cnvsrc.pth"
 DEFAULT_BEAM_SIZE = 10
+CMLR_REPO_ROOT = PROJECT_ROOT / "third_party" / "Visual_Speech_Recognition_for_Multiple_Languages"
+CMLR_MODEL_PATH = (
+    CMLR_REPO_ROOT
+    / "benchmarks"
+    / "CMLR"
+    / "models"
+    / "CMLR_V_WER8.0"
+    / "model.pth"
+)
+CMLR_MODEL_CONF = CMLR_MODEL_PATH.with_name("model.json")
+CMLR_LM_PATH = (
+    CMLR_REPO_ROOT
+    / "benchmarks"
+    / "CMLR"
+    / "language_models"
+    / "lm_zh"
+    / "model.pth"
+)
+CMLR_LM_CONF = CMLR_LM_PATH.with_name("model.json")
 TRIGGER_KEY = keyboard.Key.ctrl_r
 TRIGGER_KEY_LABEL = "Right Ctrl"
 FONT_CANDIDATES = (
@@ -277,6 +294,139 @@ class CNVSRCRecognizer:
                     [best.asdict()], self.token_list
                 ).replace("▁", " ").strip().replace("<eos>", "")
         return text, time.perf_counter() - started, len(lips)
+
+    def predict(
+        self,
+        frames_rgb: list[np.ndarray],
+        landmarks: list[np.ndarray | None],
+        timestamps: list[float],
+        greedy: bool = False,
+    ) -> tuple[str, float, int]:
+        started = time.perf_counter()
+        lips = self.prepare_rois(frames_rgb, landmarks, timestamps)
+        text, _decode_latency, frame_count = self.predict_prepared(lips, greedy)
+        return text, time.perf_counter() - started, frame_count
+
+
+class CMLRRecognizer:
+    """Run the official CMLR visual model with its matching crop and decoder."""
+
+    def __init__(
+        self,
+        repo_root: Path = CMLR_REPO_ROOT,
+        checkpoint: Path = CMLR_MODEL_PATH,
+        model_conf: Path = CMLR_MODEL_CONF,
+        language_model: Path = CMLR_LM_PATH,
+        language_model_conf: Path = CMLR_LM_CONF,
+        device: str = "cpu",
+    ) -> None:
+        self.repo_root = repo_root.resolve()
+        self.checkpoint = checkpoint.resolve()
+        self.model_conf = model_conf.resolve()
+        self.language_model = language_model.resolve()
+        self.language_model_conf = language_model_conf.resolve()
+        self.device = device
+        self.beam_size = 20
+        self.ctc_weight = 0.1
+        self.lm_weight = 0.3
+        for path in (
+            self.repo_root / "pipelines" / "model.py",
+            self.checkpoint,
+            self.model_conf,
+            self.language_model,
+            self.language_model_conf,
+        ):
+            if not path.is_file():
+                raise FileNotFoundError(f"CMLR asset not found: {path}")
+
+        # The upstream repository vendors its own ESPnet implementation.
+        # Put it first so imports resolve to the code matching these weights.
+        repo_path = str(self.repo_root)
+        if repo_path in sys.path:
+            sys.path.remove(repo_path)
+        sys.path.insert(0, repo_path)
+
+        from pipelines.detectors.retinaface.video_process import VideoProcess
+        from pipelines.data.transforms import VideoTransform
+        from pipelines.model import AVSR
+
+        self.video_process = VideoProcess(
+            crop_width=96,
+            crop_height=96,
+            window_margin=12,
+            convert_gray=True,
+        )
+        self.video_transform = VideoTransform(speed_rate=1)
+        self.model = AVSR(
+            modality="video",
+            model_path=str(self.checkpoint),
+            model_conf=str(self.model_conf),
+            rnnlm=str(self.language_model),
+            rnnlm_conf=str(self.language_model_conf),
+            penalty=0.3,
+            ctc_weight=self.ctc_weight,
+            lm_weight=self.lm_weight,
+            beam_size=self.beam_size,
+            device=device,
+        )
+        self.model.eval()
+
+    def warmup(self) -> None:
+        # Keep model loading separate from a fabricated input sample. The
+        # user's first real recording will be the first timed prediction.
+        return None
+
+    def prepare_rois(
+        self,
+        frames_rgb: list[np.ndarray],
+        landmarks: list[np.ndarray | None],
+        timestamps: list[float],
+    ) -> np.ndarray:
+        frames, aligned_landmarks = temporal_resample(
+            frames_rgb, landmarks, timestamps, target_fps=25
+        )
+        if len(frames) < 12:
+            raise ValueError(f"too_few_frames:{len(frames)}")
+        lips_gray = self.video_process(frames, aligned_landmarks)
+        if lips_gray is None:
+            raise ValueError("no_lip_sequence")
+        lips_gray = np.asarray(lips_gray, dtype=np.uint8)
+        if lips_gray.ndim != 3 or lips_gray.shape[1:] != (96, 96):
+            raise ValueError(f"unexpected_cmlr_lip_shape:{lips_gray.shape}")
+        # History clips use a common RGB MP4 container. The model path converts
+        # these frames back to grayscale before the official transform.
+        return np.repeat(lips_gray[..., None], 3, axis=3)
+
+    def predict_prepared(
+        self,
+        lips: np.ndarray,
+        greedy: bool = False,
+    ) -> tuple[str, float, int]:
+        started = time.perf_counter()
+        sequence = np.asarray(lips, dtype=np.uint8)
+        if sequence.ndim == 4 and sequence.shape[-1] == 3:
+            sequence = np.stack(
+                [cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) for frame in sequence]
+            )
+        if sequence.ndim != 3 or sequence.shape[1:] != (96, 96):
+            raise ValueError(f"unexpected_cmlr_lip_shape:{sequence.shape}")
+        data = self.video_transform(torch.from_numpy(sequence))
+        with torch.inference_mode():
+            if greedy:
+                encoded = self.model.model.encode(data.to(self.device))
+                token_ids = self.model.model.ctc.argmax(encoded.unsqueeze(0))[0].tolist()
+                blank_id = 0
+                eos_id = len(self.model.token_list) - 1
+                output: list[str] = []
+                previous = None
+                for token_id in token_ids:
+                    if token_id != previous and token_id not in (blank_id, eos_id):
+                        output.append(self.model.token_list[token_id])
+                    previous = token_id
+                text = "".join(output).replace("▁", " ").strip()
+            else:
+                text = self.model.infer(data)
+        return text, time.perf_counter() - started, len(sequence)
 
     def predict(
         self,

@@ -1,0 +1,30 @@
+{
+  "version": "cnvsrc-personal-adaptation-v0.1",
+  "language": "zh-CN",
+  "phrases": [
+    {"id": 1, "split": "train", "text": "妈妈明天买一杯牛奶"},
+    {"id": 2, "split": "train", "text": "爸爸把白纸放在包里"},
+    {"id": 3, "split": "train", "text": "我们明早去附近的博物馆"},
+    {"id": 4, "split": "train", "text": "朋友陪我去北边买面包"},
+    {"id": 5, "split": "train", "text": "麻烦把门口的木门关好"},
+    {"id": 6, "split": "train", "text": "明天下午我准备坐公交车"},
+    {"id": 7, "split": "heldout", "text": "你把蓝色杯子放桌上"},
+    {"id": 8, "split": "train", "text": "我想把这本书寄给朋友"},
+    {"id": 9, "split": "train", "text": "他买了苹果和葡萄"},
+    {"id": 10, "split": "train", "text": "请问附近有没有面馆"},
+    {"id": 11, "split": "heldout", "text": "外面风大我们别骑车了"},
+    {"id": 12, "split": "train", "text": "我们明天搬到新房子"},
+    {"id": 13, "split": "train", "text": "这部电影不太适合小朋友"},
+    {"id": 14, "split": "train", "text": "你先把门打开再说"},
+    {"id": 15, "split": "train", "text": "她每天晚上练习普通话"},
+    {"id": 16, "split": "train", "text": "我把照片发给表哥了"},
+    {"id": 17, "split": "train", "text": "这个办法比刚才那个简单"},
+    {"id": 18, "split": "train", "text": "妈妈说周末可以去公园"},
+    {"id": 19, "split": "heldout", "text": "帮我把蓝本放进包里"},
+    {"id": 20, "split": "train", "text": "我们准备明年去南方旅行"},
+    {"id": 21, "split": "train", "text": "你可以慢慢说我在听"},
+    {"id": 22, "split": "heldout", "text": "那边有一家新的面包店"},
+    {"id": 23, "split": "heldout", "text": "请把名字写在白色纸上"},
+    {"id": 24, "split": "heldout", "text": "今天我们一起买菜回家"}
+  ]
+}

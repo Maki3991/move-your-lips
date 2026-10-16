@@ -1,10 +1,14 @@
 # 唇语输入法（Move Your Lips）
 
+本项目自有代码采用 [MIT 许可证](LICENSE)；模型与第三方资源各自遵循[上游许可](THIRD_PARTY.md)。
+
 一个面向中文用户的本地优先桌面原型，目标是在不能出声的公共场合，让用户通过无声的说话动作生成可编辑中文文本。
 
 ## 当前状态
 
-项目已完成 MVP v0.1 的实时交互闭环，MVP v0.3 的功能范围已经完成，当前准备归档并进入 v0.4 模型改进。固定视频 Prototype 已完成技术验证并保留为历史基线；CNVSRC2025 的识别质量仍未达到“可用中文唇语输入”标准，v0.3 基线结果已记录，具体改善空间留给后续受控实验确认。
+项目已完成 MVP v0.1 的实时交互闭环与 MVP v0.3 的功能范围。v0.4 比较了 CNVSRC2025、CMLR 和一次 24 句个人适配实验。应用现提供通用的个人适配页面；每位使用者都可以在自己的电脑上录制、训练、比较并选择自己的候选模型。CNVSRC2025 的识别质量仍未达到“可用中文唇语输入”标准，个人适配也不保证每个人都能得到改善。
+
+这次个人实验在另录的 10 个新句子上，用同一批保存的嘴部 MP4 离线比较：原模型字符错误率 55.30%，个人候选模型 45.45%，但两者整句完全正确均为 0/10。详见 [新句子检查](docs/unseen-sentence-check-v0.1.md)。这只是一个人的小样本结果，不代表其他使用者会获得相同改善。
 
 固定视频阶段验证了公开中文视觉语音模型能否在本机完成：
 
@@ -28,12 +32,12 @@ Home 显示 + 模型后台加载（HUD 提示）
 当前状态为：
 
 ```text
-问题定义 -> POV -> HMW -> Prototype v0.1 固定视频验证 -> MVP v0.1 实时交互实现 -> MVP v0.3 功能完成与基线归档 -> MVP v0.4 模型改进
+问题定义 -> POV -> HMW -> Prototype v0.1 固定视频验证 -> MVP v0.1 实时交互实现 -> MVP v0.3 功能完成与基线归档 -> MVP v0.4 纯视觉研究收尾
 ```
 
 固定视频 Prototype 的技术结果已经归档，不代表删除：原始视频、预处理结果、模型输出和实验记录仍保留在 `test-results/` 与 `docs/evidence.md`。
 
-实时 MVP 的早期用户流见 [MVP PRD](docs/mvp-prd.md)，v0.3 范围修订见 [v0.3 PRD](docs/prd-mvp-v0.3.md)。这些文档不代表系统级输入法、模型准确率或商业可用性已经完成。
+实时 MVP 的早期用户流见 [MVP PRD](docs/mvp-prd.md)，v0.3 范围修订见 [v0.3 PRD](docs/prd-mvp-v0.3.md)。v0.4 的研究范围见 [v0.4 PRD](docs/prd-mvp-v0.4.md)，模型实验和最终结论见 [v0.4 Research](docs/research-mvp-v0.4.md)。这些文档不代表系统级输入法、模型准确率或商业可用性已经完成。
 
 ## Prototype v0.1 边界（已完成的历史阶段）
 
@@ -72,7 +76,7 @@ Home 显示 + 模型后台加载（HUD 提示）
 - 麦克风、音频识别、外部 LLM 润色；
 - 多人、侧脸、遮挡、拥挤背景和准确率承诺。
 
-开发者曾用 `--paste` 做 Lipflow 风格的当前窗口粘贴实验；默认启动脚本不启用该选项，v0.3 仅验收剪贴板输出。setup 当前只完成使用引导，个性化训练尚未接入。
+开发者曾用 `--paste` 做 Lipflow 风格的当前窗口粘贴实验；默认启动脚本不启用该选项，v0.3 仅验收剪贴板输出。个人适配已接入独立页面，仍属于研究实验。
 
 ## MVP v0.2 范围（历史迭代）
 
@@ -89,19 +93,45 @@ Home 显示 + 模型后台加载（HUD 提示）
 - 建立至少 10 句话 × 3 次的带标准答案测试集；
 - 对比固定视频离线识别、实时录制后离线识别、实时最终识别；
 - 记录 CER、整句正确率、有效帧数、失败原因和耗时；
-- 只有候选模型或个人适配在未见测试句上优于当前基线时，才考虑替换默认模型；
-- 个人微调、24 句校准和新模型接入都属于实验，不承诺必然改善。
+- 只有候选模型在未见测试句和语义可理解性上出现明确改善时，才考虑替换默认模型；
+- 个人微调、24 句校准和新模型接入都属于研究实验，不承诺必然改善；v0.4 设有明确停止条件。
 
 MVP v0.2 暂不做：系统级输入法、默认自动粘贴、音频保存、外部 LLM 润色、多人场景和准确率承诺。
 
 ## Home / HUD 本地界面
 
-Home 页面和底部状态 HUD 使用 PySide6 + QML；摄像头采集、识别和历史记录仍由 Python 逻辑处理。首次运行前，在启动脚本使用的 Python 环境中安装界面依赖，然后用现有启动脚本运行：
+Home 页面和底部状态 HUD 使用 PySide6 + QML；摄像头采集、识别和历史记录仍由 Python 逻辑处理。项目当前提供 **Windows 源码运行方式**，还没有经验证的独立安装包。准备 Python 3.10 环境后，按 [CNVSRC2025 的安装说明](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/README.md) 安装 PyTorch、VSR 依赖和人脸检测子模块，再安装本项目的界面依赖。推荐目录：
+
+```text
+move-your-lips/
+  .venv/                               # 本地 Python 环境，不提交
+  third_party/CNVSRC2025/VSR/          # 自行从上游获取，不提交
+    pretrained_models/model_avg_cncvs_2_3_cnvsrc.pth
+  outputs/mvp/                          # 录制和训练结果，不提交
+```
+
+可在项目目录下获取上游源码（含其子模块），并从上游 README 的 Model zoo 下载指定 checkpoint 到上面的 `pretrained_models` 目录；模型权重不会随本仓库提供。Windows PowerShell 示例：
 
 ```powershell
-D:\cnvsrc-env\python.exe -m pip install -r requirements-ui.txt
+New-Item -ItemType Directory -Force .\third_party | Out-Null
+git clone --recurse-submodules https://github.com/liu12366262626/CNVSRC2025.git .\third_party\CNVSRC2025
+py -3.10 -m venv .venv
+```
+
+上游人脸检测模块还需要按其 README 下载 Git LFS 权重，例如进入 `third_party/CNVSRC2025/VSR/tools/face_detection` 执行 `git lfs pull`。把 Python 环境与上游目录准备好后：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-ui.txt
 .\scripts\run_lip_input_mvp.ps1
 ```
+
+如果已有本机 Python 和 CNVSRC2025 安装，可用 `-Python`、`-VsrRoot` 指定路径，也可在仓库根目录创建被 Git 忽略的 `local.settings.json`：
+
+```json
+{"python":"D:\\path\\to\\python.exe","vsrRoot":"D:\\path\\to\\CNVSRC2025\\VSR"}
+```
+
+`-Checkpoint` 可临时指定模型文件；否则启动脚本读取本机选用的个人模型，没有选用时使用上游原模型。启动脚本以项目目录定位文件，不需要修改代码中的固定盘符。希望把 Python 包缓存也放在项目里时，可在安装前设置 `$env:PIP_CACHE_DIR = "$PWD\.cache\pip"`；系统 Python 启动器和系统临时目录仍由用户自己的 Windows 配置决定。
 
 Home 界面就绪后立即显示；本地识别模型在后台加载/预热时，底部 HUD 会继续提示“正在加载识别模型”，模型就绪后提示消失。如果模型加载失败，HUD 会显示错误，不能开始识别；这不是固定时长的假进度，也不会在启动时下载模型。Home 默认约 `1000×650`，可拖动右下角调整大小，也可用 `Ctrl +` / `Ctrl -` 调整、`Ctrl + 0` 恢复默认尺寸。
 
@@ -109,7 +139,15 @@ Home 界面就绪后立即显示；本地识别模型在后台加载/预热时�
 
 Home 内 `Ctrl+R` 手动刷新历史、`Ctrl+O` 打开 `outputs/mvp/recordings` 素材目录。每条历史记录的 More 菜单直接提供“重新播放素材”“重新转写”“查看记录详情”；素材不存在时前两个操作会禁用。播放会调用系统默认视频播放器；重新转写会读取同一个嘴部 MP4，并追加一条新的历史记录，不覆盖原结果，结果默认复制到剪贴板。详情弹窗只展示记录信息。旧记录可能缺少这些字段，显示“未记录”。关闭/最小化 Home 只会隐藏窗口，Windows 通知区域会保留 Move Your Lips 图标；点击图标或右键选择“显示 Home”可重新打开。要退出应用，请用托盘菜单的“退出 Move Your Lips”，或在**启动程序的前台终端**按 `Ctrl+C`；后者向程序发送中断信号，并不是关闭终端窗口，也不应在其他应用的复制操作中触发退出。
 
-默认素材目录在项目的 `outputs/mvp/recordings`。如果以后希望放到其他磁盘，可以启动时追加 `--recordings-dir D:\MoveYourLipsRecordings`；历史记录中只保存素材文件名和状态，不保存绝对路径。
+默认素材目录在项目的 `outputs/mvp/recordings`。如需指定其他素材目录，可直接运行 `scripts/lip_input_hud.py --recordings-dir <目录>`；历史记录中只保存素材文件名和状态，不保存绝对路径。
+
+## 个人适配：每个人独立录制
+
+点击侧边栏的 **24 / 个人适配**，创建一轮采集。按页面句子逐句朗读，点“录制 / 结束当前句”或按两次右 Ctrl。每句成功保存后自动进入下一句；关闭应用后从本机记录的下一句继续。共 24 句，其中 18 句用于小范围调整视觉模型，6 句只用于效果比较。
+
+录完后点击“训练并比较”。CPU 上可能需要几分钟；完成后页面显示留出句训练前后的字符错误率。只有留出句指标改善才保存候选权重，且仍需手动点击“启用个人模型”并重启应用。页面也可以选择“恢复原模型”。这只是初筛：6 句太少，不能证明在日常新句上一定更准。真实体验需要另外录制未参与训练的新句比较。训练日志、嘴部样本、候选权重和激活配置均保存在 `outputs/mvp/`，不会提交到仓库。
+
+目前不会自动下载模型、不会自动安装 Python 环境，也不会把个人训练结果上传或共享。其他使用者拿到的是同一套采集和训练代码，各自生成自己的本地会话；仓库里没有预置某个人的适配权重。
 
 如果当时模型线程仍在运行，第一次终端 `Ctrl+C` 可能需要等待；在同一终端**再按一次 `Ctrl+C` 会强制结束进程**，可能中断正在写入的记录，仅作为退出卡住时的后备办法。
 
@@ -127,5 +165,7 @@ Home 内 `Ctrl+R` 手动刷新历史、`Ctrl+O` 打开 `outputs/mvp/recordings` 
 
 - “中文数据集上的 CER”不等于“对着普通电脑摄像头连续输入中文可用”。
 - 摄像头本身仍会采集脸部画面；“不使用麦克风”和“完全没有隐私风险”不是同一件事。
-- 上游模型、数据集和权重的许可证需要单独核对；开源自己的适配代码不自动授予上游权重或数据的再分发权。
+- [CNVSRC2025 VSR README](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/README.md) 将上游代码的使用范围限定为非商业比较或基准测试；其 [LICENSE](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/LICENSE) 还有个人研究、私下学习等条件。请先阅读上游条款，再决定自己的用途。公开本项目源码不等于取得上游代码、数据或权重的广泛使用及再分发许可。
+- 可选的 CMLR 对比模型也有[独立的非商业比较/基准测试限制](https://github.com/mpc001/Visual_Speech_Recognition_for_Multiple_Languages#license)，并不随本仓库一起分发。
+- 本项目自有源码采用 MIT；这不扩大上游模型、数据和代码的许可范围。当前发布的是需要自行安装上游依赖的源码研究版，不是可直接运行的 Windows 安装包。
 - GitHub 仓库、可运行 Demo、用户验证和商业可用性是四个不同的完成状态。

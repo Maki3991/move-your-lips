@@ -39,6 +39,9 @@ from PIL import Image, ImageDraw, ImageTk
 from pynput import keyboard
 
 from lip_input_mvp import (
+    CMLRRecognizer,
+    CMLR_REPO_ROOT,
+    CMLR_MODEL_PATH,
     CNVSRCRecognizer,
     DEFAULT_CHECKPOINT_NAME,
     DEFAULT_BEAM_SIZE,
@@ -1309,15 +1312,26 @@ class HudApp:
     def _load_models(self) -> None:
         try:
             vsr_root = self.args.vsr_root.resolve()
-            checkpoint = self.args.checkpoint or (vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME)
+            if self.args.model == "cmlr":
+                checkpoint = self.args.cmlr_checkpoint or CMLR_MODEL_PATH
+                checkpoint = checkpoint.resolve()
+                self.recognizer = CMLRRecognizer(
+                    repo_root=self.args.cmlr_root,
+                    checkpoint=checkpoint,
+                    device=self.args.device,
+                )
+            else:
+                checkpoint = self.args.checkpoint or (vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME)
+                self.recognizer = CNVSRCRecognizer(
+                    vsr_root,
+                    checkpoint,
+                    device=self.args.device,
+                    beam_size=self.args.beam_size,
+                )
             self.args.checkpoint = checkpoint
-            self.recognizer = CNVSRCRecognizer(
-                vsr_root,
-                checkpoint,
-                device=self.args.device,
-                beam_size=self.args.beam_size,
-            )
             self.recognizer.warmup()
+            # Both paths currently use the same local RetinaFace + FAN
+            # capture landmarks; CMLR applies its own official mouth crop.
             self.landmarker = RealtimeLandmarker(vsr_root, self.args.face_model)
             self.root.after(0, self._models_ready)
         except Exception as exc:
@@ -1535,6 +1549,7 @@ class HudApp:
                             "latency_seconds": round(latency, 3),
                             "model_frames": frame_count,
                             "capture_frames": frame_count,
+                            "model": self.args.model,
                             "checkpoint": str(self.args.checkpoint or "default"),
                             "face_model": self.args.face_model,
                             "device": self.args.device,
@@ -1644,8 +1659,11 @@ class HudApp:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Move Your Lips resident bottom-HUD MVP")
+    parser.add_argument("--model", choices=["cnvsrc", "cmlr"], default="cnvsrc")
     parser.add_argument("--vsr-root", type=Path, default=DEFAULT_VSR_ROOT)
     parser.add_argument("--checkpoint", type=Path, default=None)
+    parser.add_argument("--cmlr-root", type=Path, default=CMLR_REPO_ROOT)
+    parser.add_argument("--cmlr-checkpoint", type=Path, default=CMLR_MODEL_PATH)
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--face-model", choices=["mobilenet0.25", "resnet50"], default="mobilenet0.25")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
@@ -1665,6 +1683,17 @@ def parse_args() -> argparse.Namespace:
         default=PROJECT_ROOT / "outputs" / "mvp" / "recordings",
         help="Directory for normalized mouth-only evidence clips",
     )
+    parser.add_argument(
+        "--save-lossless-next-input",
+        action="store_true",
+        help="Save the next prepared CNVSRC mouth input once for offline diagnostics",
+    )
+    parser.add_argument(
+        "--practice-set",
+        type=Path,
+        default=None,
+        help="Collect a labeled CNVSRC personal-adaptation phrase set",
+    )
     parser.add_argument("--paste", action="store_true")
     parser.add_argument("--copy-only", action="store_true", help="Explicitly keep clipboard-only output")
     parser.add_argument("--self-test", action="store_true")
@@ -1673,10 +1702,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.save_lossless_next_input and args.model != "cnvsrc":
+        raise ValueError("--save-lossless-next-input is only supported with --model cnvsrc")
+    if args.practice_set and args.model != "cnvsrc":
+        raise ValueError("--practice-set is only supported with --model cnvsrc")
     vsr_root = args.vsr_root.resolve()
-    checkpoint = args.checkpoint or (vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME)
     if not vsr_root.is_dir():
         raise FileNotFoundError(f"VSR root not found: {vsr_root}")
+    if args.model == "cmlr":
+        checkpoint = args.cmlr_checkpoint.resolve()
+        if not args.cmlr_root.is_dir():
+            raise FileNotFoundError(f"CMLR repository not found: {args.cmlr_root}")
+    else:
+        checkpoint = args.checkpoint or (vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME)
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     if args.device == "cuda":
@@ -1688,13 +1726,20 @@ def main() -> int:
         args.paste = False
 
     if args.self_test:
-        print("[mvp-hud] loading CNVSRC2025 model...")
-        reader = CNVSRCRecognizer(
-            vsr_root,
-            checkpoint,
-            device=args.device,
-            beam_size=args.beam_size,
-        )
+        print(f"[mvp-hud] loading {args.model} model...")
+        if args.model == "cmlr":
+            reader = CMLRRecognizer(
+                repo_root=args.cmlr_root,
+                checkpoint=checkpoint,
+                device=args.device,
+            )
+        else:
+            reader = CNVSRCRecognizer(
+                vsr_root,
+                checkpoint,
+                device=args.device,
+                beam_size=args.beam_size,
+            )
         print(f"[mvp-hud] model ready: {checkpoint}")
         print("[mvp-hud] self-test passed")
         return 0

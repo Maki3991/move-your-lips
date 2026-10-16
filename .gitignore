@@ -5,3 +5,11 @@ outputs/mvp
 scripts/__pycache__
 outputs
 scripts/ui/__pycache__/
+
+# Local research weights and the checked-out upstream inference repository
+/models/
+/third_party/Visual_Speech_Recognition_for_Multiple_Languages/
+/third_party/CNVSRC2025/
+/.venv/
+/local.settings.json
+/.cache/

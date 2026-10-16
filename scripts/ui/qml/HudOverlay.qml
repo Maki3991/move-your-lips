@@ -192,7 +192,7 @@ Window {
                 y: 48
                 width: parent.width
                 height: 15
-                text: "松开 Right Ctrl 完成"
+                text: "再按 Right Ctrl 完成"
                 color: "#858585"
                 font.family: "Segoe UI"
                 font.pixelSize: 10
