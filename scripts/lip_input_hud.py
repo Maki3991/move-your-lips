@@ -8,7 +8,7 @@ below as a local reference while the migration is being exercised.
 * no large OpenCV camera window;
 * a hidden resident process with a small bottom-center HUD;
 * a background camera thread;
-* a short tail after Right Ctrl is released;
+* a short tail after Right Ctrl is pressed a second time;
 * live greedy preview and final beam-search recognition stay separate.
 
 The default output is still clipboard-only.  ``--paste`` is intentionally an
@@ -1659,6 +1659,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-seconds", type=float, default=0.4)
     parser.add_argument("--detect-interval", type=float, default=0.25)
     parser.add_argument("--max-seconds", type=float, default=20.0)
+    parser.add_argument(
+        "--recordings-dir",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "mvp" / "recordings",
+        help="Directory for normalized mouth-only evidence clips",
+    )
     parser.add_argument("--paste", action="store_true")
     parser.add_argument("--copy-only", action="store_true", help="Explicitly keep clipboard-only output")
     parser.add_argument("--self-test", action="store_true")

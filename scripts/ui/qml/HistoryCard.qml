@@ -10,8 +10,13 @@ Rectangle {
     property string leadText: ""
     property string previewText: ""
     property string timestamp: "时间未知"
+    property string details: ""
+    property bool mediaAvailable: false
     property var appBridge
     signal deleteRequested(string recordId)
+    signal playMediaRequested(string recordId)
+    signal retranscribeRequested(string recordId)
+    signal detailsRequested(string recordId, string details)
 
     onRecordIdChanged: {
         copyTimer.stop()
@@ -112,8 +117,8 @@ Rectangle {
             anchors.top: parent.top
             width: 96
             height: 32
-            opacity: cardHover.hovered ? 1 : 0
-            visible: opacity > 0.01
+            opacity: cardHover.hovered || moreMenu.visible ? 1 : 0
+            visible: opacity > 0.01 || moreMenu.visible
 
             Behavior on opacity {
                 NumberAnimation {
@@ -165,6 +170,7 @@ Rectangle {
                         id: copyMouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        enabled: card.cardText.length > 0
                         onClicked: {
                             if (card.appBridge.copyText(card.cardText)) {
                                 copyAction.copied = true
@@ -242,10 +248,28 @@ Rectangle {
                         id: moreMouse
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: card.appBridge.setNotice("更多操作暂未开放")
+                        onClicked: moreMenu.popup()
                         ToolTip.visible: containsMouse
-                        ToolTip.text: "更多操作暂未开放"
+                        ToolTip.text: "更多"
                         ToolTip.delay: 450
+                    }
+                    Menu {
+                        id: moreMenu
+                        y: moreAction.height
+                        MenuItem {
+                            text: "重新播放素材"
+                            enabled: card.mediaAvailable
+                            onTriggered: card.playMediaRequested(card.recordId)
+                        }
+                        MenuItem {
+                            text: "重新转写"
+                            enabled: card.mediaAvailable
+                            onTriggered: card.retranscribeRequested(card.recordId)
+                        }
+                        MenuItem {
+                            text: "查看记录详情"
+                            onTriggered: card.detailsRequested(card.recordId, card.details)
+                        }
                     }
                 }
         }

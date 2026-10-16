@@ -79,6 +79,16 @@ ApplicationWindow {
                                             true)
     }
 
+    Shortcut {
+        sequence: "Ctrl+R"
+        onActivated: bridge.refreshHistory()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+O"
+        onActivated: bridge.openStorageFolder()
+    }
+
     Rectangle {
         id: titleBar
         x: 0
@@ -258,7 +268,8 @@ ApplicationWindow {
                     x: 0
                     y: 40
                     width: parent.width
-                    height: 101
+                    // Matches the 55px Page heading component in Figma.
+                    height: 55
 
                     Column {
                         anchors.left: parent.left
@@ -377,10 +388,28 @@ ApplicationWindow {
                             leadText: modelData.lead
                             previewText: modelData.preview
                             timestamp: modelData.timestamp
+                            details: modelData.details
+                            mediaAvailable: modelData.mediaAvailable
                             appBridge: bridge
                             onDeleteRequested: function(id) {
                                 pendingDeleteId = id
                                 deleteDialog.open()
+                            }
+                            onPlayMediaRequested: function(id) {
+                                if (bridge.playMedia(id))
+                                    homeWindow.showNotice("已打开素材播放器")
+                                else
+                                    homeWindow.showNotice("素材不存在或已被删除")
+                            }
+                            onRetranscribeRequested: function(id) {
+                                if (bridge.requestRetranscribe(id))
+                                    homeWindow.showNotice("已开始重新转写")
+                                else
+                                    homeWindow.showNotice("素材不存在或已被删除")
+                            }
+                            onDetailsRequested: function(id, value) {
+                                detailText = value
+                                detailsDialog.open()
                             }
                         }
                     }
@@ -389,7 +418,7 @@ ApplicationWindow {
                 Text {
                     anchors.centerIn: historyList
                     visible: bridge.historyItems.length === 0
-                    text: "还没有识别记录\n按住右 Ctrl 创建第一条记录"
+                    text: "还没有识别记录\n按一下右 Ctrl 创建第一条记录"
                     color: "#64777a"
                     font.family: "Inter"
                     font.pixelSize: 14
@@ -447,6 +476,60 @@ ApplicationWindow {
     }
 
     property string pendingDeleteId: ""
+    property string detailText: ""
+
+    function showNotice(message) {
+        bridge.setNotice(message)
+        noticePopup.open()
+        noticeTimer.restart()
+    }
+
+    Popup {
+        id: detailsDialog
+        parent: Overlay.overlay
+        x: (parent.width - width) / 2
+        y: (parent.height - height) / 2
+        width: Math.min(440, parent.width - 48)
+        height: 420
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            radius: 16
+            color: "#ffffff"
+            border.color: "#dee8e5"
+        }
+
+        contentItem: Flickable {
+            clip: true
+            contentHeight: detailsColumn.implicitHeight + 40
+            Column {
+                id: detailsColumn
+                x: 24
+                y: 20
+                width: parent.width - 48
+                spacing: 12
+                Text {
+                    text: "记录详情"
+                    color: "#26383a"
+                    font.family: "Inter"
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    width: parent.width
+                    text: homeWindow.detailText
+                    color: "#64777a"
+                    font.family: "Inter"
+                    font.pixelSize: 13
+                    wrapMode: Text.WrapAnywhere
+                    lineHeight: 1.5
+                }
+
+            }
+        }
+    }
 
     Popup {
         id: deleteDialog
@@ -540,12 +623,10 @@ ApplicationWindow {
                             hoverEnabled: true
                             onClicked: {
                                 if (bridge.deleteRecord(pendingDeleteId))
-                                    bridge.setNotice("记录已删除")
+                                    homeWindow.showNotice("记录已删除")
                                 else
-                                    bridge.setNotice("删除失败，历史文件可能已变化")
+                                    homeWindow.showNotice("删除失败，历史文件可能已变化")
                                 deleteDialog.close()
-                                noticePopup.open()
-                                noticeTimer.restart()
                             }
                         }
                     }

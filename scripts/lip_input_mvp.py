@@ -250,15 +250,19 @@ class CNVSRCRecognizer:
             previous = token_id
         return "".join(output).replace("▁", " ").strip()
 
-    def predict(
+    def predict_prepared(
         self,
-        frames_rgb: list[np.ndarray],
-        landmarks: list[np.ndarray | None],
-        timestamps: list[float],
+        lips: np.ndarray,
         greedy: bool = False,
     ) -> tuple[str, float, int]:
+        """Decode a sequence already prepared by :meth:`prepare_rois`.
+
+        The Qt workflow stores this exact sequence before decoding so a later
+        playback/re-transcription flow can use the same model input. Keeping
+        the decoder separate also avoids preprocessing the final recording
+        twice.
+        """
         started = time.perf_counter()
-        lips = self.prepare_rois(frames_rgb, landmarks, timestamps)
         encoded = self._encode(lips)
         with torch.inference_mode():
             if greedy:
@@ -273,6 +277,18 @@ class CNVSRCRecognizer:
                     [best.asdict()], self.token_list
                 ).replace("▁", " ").strip().replace("<eos>", "")
         return text, time.perf_counter() - started, len(lips)
+
+    def predict(
+        self,
+        frames_rgb: list[np.ndarray],
+        landmarks: list[np.ndarray | None],
+        timestamps: list[float],
+        greedy: bool = False,
+    ) -> tuple[str, float, int]:
+        started = time.perf_counter()
+        lips = self.prepare_rois(frames_rgb, landmarks, timestamps)
+        text, _decode_latency, frame_count = self.predict_prepared(lips, greedy)
+        return text, time.perf_counter() - started, frame_count
 
 
 @dataclass
