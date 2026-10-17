@@ -809,8 +809,6 @@ class QtHudApp(QObject):
         if not message:
             if self.args.model != "cnvsrc":
                 message = "当前个人适配流程仅支持 CNVSRC 模型。"
-            elif self.recognizer is None or self.camera is None:
-                message = "正在加载识别模型，完成后即可开始采集。"
         active_config = PROJECT_ROOT / "outputs" / "mvp" / "active-model.json"
         active_path = ""
         if active_config.exists():
