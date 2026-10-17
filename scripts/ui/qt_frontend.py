@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -247,6 +248,9 @@ class AppBridge(QObject):
     adaptationTrainRequested = Signal()
     adaptationActivateRequested = Signal()
     adaptationResetRequested = Signal()
+    adaptationRedoRequested = Signal()
+    adaptationRestartRequested = Signal()
+    adaptationPageToggled = Signal(bool)
 
     def __init__(self, history_path: Path, recordings_path: Path | None = None) -> None:
         super().__init__()
@@ -271,6 +275,7 @@ class AppBridge(QObject):
             "training": False, "recording": False, "processing": False, "message": "",
             "beforeCer": -1, "afterCer": -1,
             "candidate": "", "active": "", "loaded": "尚未载入",
+            "switching": False, "usingPersonal": False, "captureArmed": False,
         }
 
     @Property("QVariantMap", notify=adaptationChanged)
@@ -300,6 +305,18 @@ class AppBridge(QObject):
     @Slot()
     def resetAdaptationModel(self) -> None:  # noqa: N802
         self.adaptationResetRequested.emit()
+
+    @Slot()
+    def redoPreviousAdaptation(self) -> None:  # noqa: N802
+        self.adaptationRedoRequested.emit()
+
+    @Slot()
+    def restartAdaptation(self) -> None:  # noqa: N802
+        self.adaptationRestartRequested.emit()
+
+    @Slot(bool)
+    def setAdaptationPageActive(self, active: bool) -> None:  # noqa: N802
+        self.adaptationPageToggled.emit(active)
 
     @Property("QVariantList", notify=historyChanged)
     def historyItems(self) -> list[dict[str, Any]]:  # noqa: N802
@@ -631,7 +648,13 @@ class QtHudApp(QObject):
         self.practice_session_id = ""
         self.practice_path: Path | None = None
         self._active_practice_phrase: dict[str, Any] | None = None
+        self.adaptation_capture_armed = False
         self.adaptation_process: subprocess.Popen | None = None
+        self.adaptation_switch_future: Future | None = None
+        self.adaptation_switch_target: Path | None = None
+        self.adaptation_switch_message = ""
+        self.restart_after_model_switch = False
+        self.redo_after_training_cancel = False
         self.adaptation_root = PROJECT_ROOT / "outputs" / "mvp" / "personal_adaptation"
         self.adaptation_current = self.adaptation_root / "current-session.json"
         practice_set = getattr(args, "practice_set", None)
@@ -714,6 +737,9 @@ class QtHudApp(QObject):
         self.bridge.adaptationTrainRequested.connect(self._train_adaptation)
         self.bridge.adaptationActivateRequested.connect(self._activate_adaptation)
         self.bridge.adaptationResetRequested.connect(self._reset_adaptation_model)
+        self.bridge.adaptationRedoRequested.connect(self._redo_previous_adaptation)
+        self.bridge.adaptationRestartRequested.connect(self._restart_adaptation)
+        self.bridge.adaptationPageToggled.connect(self._adaptation_page_toggled)
         self.keyboardPress.connect(self._key_press, Qt.ConnectionType.QueuedConnection)
         self.keyboardRelease.connect(self._key_release, Qt.ConnectionType.QueuedConnection)
         self.app.aboutToQuit.connect(self._shutdown)
@@ -791,6 +817,13 @@ class QtHudApp(QObject):
             print(f"[mvp-hud] cannot resume adaptation session: {exc}", file=sys.stderr)
 
     def _update_adaptation(self, message: str = "") -> None:
+        adaptation_recording = (
+            self._active_practice_phrase is not None
+            and self.mode in ("starting_camera", "listening")
+        )
+        adaptation_processing = (
+            self._active_practice_phrase is not None and self.mode == "processing"
+        )
         report = None
         if self.practice_path is not None:
             report_path = self.practice_path.parent / "adaptation-report.json"
@@ -816,25 +849,38 @@ class QtHudApp(QObject):
                 active_path = str(json.loads(active_config.read_text(encoding="utf-8"))["checkpoint"])
             except (OSError, ValueError, KeyError):
                 pass
+        loaded_checkpoint = Path(self.args.checkpoint).resolve() if getattr(self.args, "checkpoint", None) else None
+        candidate_path = candidate.resolve() if candidate is not None else None
+        using_personal = bool(
+            loaded_checkpoint is not None
+            and candidate_path is not None
+            and loaded_checkpoint == candidate_path
+        )
+        switching = self.adaptation_switch_future is not None
         self.bridge.set_adaptation({
             "available": (
                 self.args.model == "cnvsrc"
                 and self.recognizer is not None
                 and self.camera is not None
+                and not switching
+                and (self.mode in ("ready", "result", "error") or adaptation_recording)
             ),
             "count": self.practice_index,
             "total": 24,
             "phrase": current["text"] if current else "",
             "session": self.practice_session_id,
             "training": self.adaptation_process is not None and self.adaptation_process.poll() is None,
-            "recording": self.mode in ("starting_camera", "listening"),
-            "processing": self.mode == "processing",
+            "recording": adaptation_recording,
+            "processing": adaptation_processing,
             "message": message,
             "beforeCer": round(report["heldout_before"]["cer"] * 100, 1) if report else -1,
             "afterCer": round(report["heldout_after"]["cer"] * 100, 1) if report else -1,
             "candidate": str(candidate) if candidate and candidate.is_file() else "",
             "active": active_path,
             "loaded": Path(self.args.checkpoint).name if getattr(self.args, "checkpoint", None) else "尚未载入",
+            "switching": switching,
+            "usingPersonal": using_personal,
+            "captureArmed": self.adaptation_capture_armed,
         })
 
     @Slot()
@@ -859,16 +905,75 @@ class QtHudApp(QObject):
     def _record_adaptation(self) -> None:
         # The main page action creates the local session on first use and
         # immediately records its first phrase.
-        if not self.practice_phrases:
-            self._start_adaptation()
-            if not self.practice_phrases:
-                return
+        if not self._adaptation_view_open() and not self.practice_cli_session:
+            return
         if self.practice_index >= 24:
             return
         if self.mode in ("starting_camera", "listening"):
-            self.begin_tail()
-        elif self.mode in ("ready", "result", "error"):
-            self.begin_recording()
+            if self._active_practice_phrase is not None:
+                self.begin_tail()
+            else:
+                self._update_adaptation("请先结束当前的普通识别，再开始个人适配。")
+            return
+        if self.mode not in ("ready", "result", "error"):
+            return
+        self.adaptation_capture_armed = True
+        if not self.practice_phrases:
+            self._start_adaptation()
+            if not self.practice_phrases:
+                self.adaptation_capture_armed = False
+                return
+        self.begin_recording()
+
+    @Slot()
+    def _redo_previous_adaptation(self) -> None:
+        if self.adaptation_process is not None:
+            if self.adaptation_process.poll() is None:
+                self.redo_after_training_cancel = True
+                try:
+                    self.adaptation_process.terminate()
+                    self._update_adaptation("正在停止训练，以便重录上一句。")
+                except OSError as exc:
+                    self.redo_after_training_cancel = False
+                    self._update_adaptation(f"无法暂停训练：{exc}")
+                return
+            self.adaptation_process = None
+        if (self.practice_path is None or self.practice_index < 1
+                or self.adaptation_switch_future is not None
+                or self.mode not in ("ready", "result", "error")):
+            return
+        manifest_path = self.practice_path.parent / "manifest.jsonl"
+        try:
+            rows = [
+                json.loads(line)
+                for line in manifest_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            last = rows[-1]
+            if int(last.get("phrase_id", -1)) != self.practice_index:
+                raise ValueError("上一句素材与采集进度不一致")
+            sample_path = (self.practice_path / str(last["file"])).resolve()
+            if self.practice_path.resolve() not in sample_path.parents:
+                raise ValueError("上一句素材路径无效")
+            manifest_tmp = manifest_path.with_suffix(".tmp")
+            manifest_tmp.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in rows[:-1])
+                + ("\n" if len(rows) > 1 else ""),
+                encoding="utf-8",
+            )
+            os.replace(manifest_tmp, manifest_path)
+            try:
+                sample_path.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"[mvp-hud] could not remove replaced adaptation sample: {exc}", file=sys.stderr)
+            (self.practice_path.parent / "adaptation-report.json").unlink(missing_ok=True)
+            (self.practice_path.parent / "cnvsrc-personal-candidate.pth").unlink(missing_ok=True)
+            self.practice_index -= 1
+            self.mode = "ready"
+            self._update_adaptation("已返回上一句，请重新录制。")
+            self._show_practice_prompt()
+        except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
+            self._update_adaptation(f"无法返回上一句：{exc}")
 
     @Slot()
     def _train_adaptation(self) -> None:
@@ -902,19 +1007,110 @@ class QtHudApp(QObject):
         state = self.bridge.adaptation
         candidate = str(state.get("candidate") or "")
         if not candidate or not Path(candidate).is_file():
-            self._update_adaptation("没有通过留出句比较的个人模型。")
+            self._update_adaptation("没有可用的个人模型。")
             return
-        config = PROJECT_ROOT / "outputs" / "mvp" / "active-model.json"
-        config.parent.mkdir(parents=True, exist_ok=True)
-        temporary = config.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"checkpoint": candidate}, ensure_ascii=False) + "\n", encoding="utf-8")
-        os.replace(temporary, config)
-        self._update_adaptation("已选用个人模型。退出并重新启动应用后生效。")
+        self._switch_adaptation_model(Path(candidate), "已切换到个人模型。")
 
     @Slot()
     def _reset_adaptation_model(self) -> None:
-        (PROJECT_ROOT / "outputs" / "mvp" / "active-model.json").unlink(missing_ok=True)
-        self._update_adaptation("已选用原模型。退出并重新启动应用后生效。")
+        self._switch_adaptation_model(self._base_adaptation_checkpoint(), "已切换回原模型。")
+
+    def _base_adaptation_checkpoint(self) -> Path:
+        return (self.args.vsr_root / "pretrained_models" / DEFAULT_CHECKPOINT_NAME).resolve()
+
+    @staticmethod
+    def _build_adaptation_recognizer(vsr_root: Path, checkpoint: Path, device: str, beam_size: int):
+        recognizer = CNVSRCRecognizer(vsr_root, checkpoint, device=device, beam_size=beam_size)
+        recognizer.warmup()
+        return recognizer
+
+    def _persist_adaptation_model(self, checkpoint: Path) -> None:
+        config = PROJECT_ROOT / "outputs" / "mvp" / "active-model.json"
+        base = self._base_adaptation_checkpoint()
+        if checkpoint.resolve() == base:
+            config.unlink(missing_ok=True)
+            return
+        config.parent.mkdir(parents=True, exist_ok=True)
+        temporary = config.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps({"checkpoint": str(checkpoint.resolve())}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, config)
+
+    def _switch_adaptation_model(
+        self, checkpoint: Path, message: str, *, restart_after: bool = False
+    ) -> None:
+        if self.adaptation_switch_future is not None:
+            return
+        if self.mode in ("starting_camera", "listening", "processing", "retranscribing"):
+            self._update_adaptation("请等当前识别结束后再切换模型。")
+            return
+        checkpoint = checkpoint.resolve()
+        if not checkpoint.is_file():
+            self._update_adaptation(f"模型文件不存在：{checkpoint}")
+            return
+        self.restart_after_model_switch = restart_after
+        current = Path(self.args.checkpoint).resolve() if self.args.checkpoint else None
+        if checkpoint == current:
+            try:
+                self._persist_adaptation_model(checkpoint)
+                if restart_after:
+                    self._finish_restart_adaptation()
+                else:
+                    self._update_adaptation(message)
+            except OSError as exc:
+                self.restart_after_model_switch = False
+                self._update_adaptation(f"保存模型选择失败：{exc}")
+            return
+        self.adaptation_switch_target = checkpoint
+        self.adaptation_switch_message = message
+        self.adaptation_switch_future = self.model_executor.submit(
+            self._build_adaptation_recognizer,
+            self.args.vsr_root.resolve(),
+            checkpoint,
+            self.args.device,
+            self.args.beam_size,
+        )
+        self._update_adaptation("正在加载所选模型，请稍候。")
+
+    def _finish_restart_adaptation(self) -> None:
+        session_root = self.practice_path.parent if self.practice_path is not None else None
+        if session_root is not None and session_root.exists():
+            resolved_root = session_root.resolve()
+            if resolved_root.parent != self.adaptation_root.resolve() or not resolved_root.name.startswith("session-"):
+                self._update_adaptation("当前采集目录校验失败，未删除任何文件。")
+                return
+            try:
+                shutil.rmtree(resolved_root)
+            except OSError as exc:
+                self._update_adaptation(f"清理本轮素材失败：{exc}")
+                return
+        self.adaptation_current.unlink(missing_ok=True)
+        self.practice_path = None
+        self.practice_session_id = ""
+        self.practice_phrases = []
+        self.practice_index = 0
+        self.adaptation_capture_armed = False
+        self.restart_after_model_switch = False
+        try:
+            self._new_practice_session(self.practice_phrase_set)
+            self.mode = "ready"
+            self._update_adaptation("本轮素材和个人模型已清理，请从第 1 句重新录制。")
+            self._show_practice_prompt()
+        except (OSError, ValueError) as exc:
+            self._update_adaptation(f"重新开始失败：{exc}")
+
+    @Slot()
+    def _restart_adaptation(self) -> None:
+        if self.adaptation_process is not None and self.adaptation_process.poll() is None:
+            self._update_adaptation("训练进行中，完成后再重新开始。")
+            return
+        self._switch_adaptation_model(
+            self._base_adaptation_checkpoint(),
+            "正在切回原模型，随后清理本轮并重新开始。",
+            restart_after=True,
+        )
 
     @staticmethod
     def _make_tray_icon(home_icon_path: Path) -> QIcon:
@@ -1028,6 +1224,28 @@ class QtHudApp(QObject):
         )
         self.listener.start()
 
+    def _adaptation_view_open(self) -> bool:
+        return bool(
+            self.home_window is not None
+            and self.home_window.isVisible()
+            and self.home_window.property("adaptationPage")
+        )
+
+    def _practice_capture_active(self) -> bool:
+        return self.practice_cli_session or (
+            self.adaptation_capture_armed and self._adaptation_view_open()
+        )
+
+    @Slot(bool)
+    def _adaptation_page_toggled(self, active: bool) -> None:
+        if not active:
+            self.adaptation_capture_armed = False
+            if self.mode == "ready" and not self.practice_cli_session:
+                self.bridge.set_hud("ready", "", "", visible=False)
+        elif self.practice_cli_session and self.practice_phrases and self.mode == "ready":
+            self._show_practice_prompt()
+        self._update_adaptation()
+
     @Slot(object)
     def _key_press(self, key: Any) -> None:
         if key == keyboard.Key.esc:
@@ -1036,12 +1254,7 @@ class QtHudApp(QObject):
         if key != self.trigger_key or self.key_down:
             return
         self.key_down = True
-        adaptation_view = (
-            self.home_window is not None
-            and self.home_window.isVisible()
-            and bool(self.home_window.property("adaptationPage"))
-        )
-        if adaptation_view:
+        if self._adaptation_view_open() and self.adaptation_capture_armed:
             if self.practice_index < 24:
                 self._record_adaptation()
             return
@@ -1123,13 +1336,20 @@ class QtHudApp(QObject):
         )
         self.mode = "ready"
         self._update_adaptation()
-        if self.practice_phrases:
+        if self.practice_phrases and self.practice_index >= 24:
+            report_path = self.practice_path.parent / "adaptation-report.json" if self.practice_path else None
+            if report_path is not None and not report_path.is_file():
+                QTimer.singleShot(0, self._train_adaptation)
+        elif self.practice_phrases:
             self._show_practice_prompt()
         else:
             self.bridge.set_hud("ready", "", "", visible=False)
         self.bridge.set_home_visible(True)
 
     def _show_practice_prompt(self) -> None:
+        if not self._practice_capture_active():
+            self.bridge.set_hud("ready", "", "", visible=False)
+            return
         if self.practice_index >= len(self.practice_phrases):
             self.mode = "ready"
             self.bridge.set_hud("ready", "", "", visible=False)
@@ -1154,17 +1374,9 @@ class QtHudApp(QObject):
         if self.recognizer is None or self.camera is None:
             return
         self.session += 1
-        adaptation_view = (
-            self.practice_cli_session
-            or (
-                self.home_window is not None
-                and self.home_window.isVisible()
-                and bool(self.home_window.property("adaptationPage"))
-            )
-        )
         phrase = (
             self.practice_phrases[self.practice_index]
-            if adaptation_view
+            if self._practice_capture_active()
             and self.practice_phrases
             and self.practice_index < len(self.practice_phrases)
             else None
@@ -1184,7 +1396,7 @@ class QtHudApp(QObject):
         self.bridge.set_camera_image(False)
         if phrase:
             self.bridge.set_hud(
-                "starting_camera", f"采集 {self.practice_index + 1}/24", f"请读：{phrase['text']}"
+                "starting_camera", f"个人适配采集 {self.practice_index + 1}/24", f"请读：{phrase['text']}"
             )
         else:
             self.bridge.set_hud("starting_camera", "启动摄像头", "正在打开摄像头")
@@ -1196,7 +1408,11 @@ class QtHudApp(QObject):
             return
         self.tailing = True
         self.mode = "processing"
-        self.bridge.set_hud("processing", "识别修改中", "正在识别并修改内容")
+        title = (
+            f"个人适配采集 {self.practice_index + 1}/24"
+            if self._active_practice_phrase else "识别修改中"
+        )
+        self.bridge.set_hud("processing", title, "正在识别并修改内容")
         self._update_adaptation()
         session = self.session
         QTimer.singleShot(
@@ -1220,7 +1436,11 @@ class QtHudApp(QObject):
         if self.recognizer is None:
             self._show_error("识别模型尚未准备好")
             return
-        self.bridge.set_hud("processing", "识别修改中", "正在识别并修改内容")
+        title = (
+            f"个人适配采集 {self.practice_index + 1}/24"
+            if self._active_practice_phrase else "识别修改中"
+        )
+        self.bridge.set_hud("processing", title, "正在识别并修改内容")
         self.final_future = (
             session,
             self.model_executor.submit(
@@ -1511,11 +1731,46 @@ class QtHudApp(QObject):
         QTimer.singleShot(int(self.args.preview_interval * 1000), self._queue_preview)
 
     def _poll_futures(self) -> None:
+        if self.adaptation_switch_future is not None and self.adaptation_switch_future.done():
+            future = self.adaptation_switch_future
+            checkpoint = self.adaptation_switch_target
+            message = self.adaptation_switch_message
+            self.adaptation_switch_future = None
+            self.adaptation_switch_target = None
+            self.adaptation_switch_message = ""
+            try:
+                recognizer = future.result()
+                if checkpoint is None:
+                    raise RuntimeError("模型切换目标丢失")
+                self._persist_adaptation_model(checkpoint)
+            except Exception as exc:
+                self.restart_after_model_switch = False
+                self._update_adaptation(f"模型切换失败：{exc}")
+            else:
+                self.recognizer = recognizer
+                self.args.checkpoint = checkpoint
+                if self.restart_after_model_switch:
+                    self._finish_restart_adaptation()
+                else:
+                    self._update_adaptation(message)
+
         if self.adaptation_process is not None and self.adaptation_process.poll() is not None:
             code = self.adaptation_process.returncode
             self.adaptation_process = None
-            if code == 0:
-                self._update_adaptation("训练结束。请查看留出句结果，再决定是否启用个人模型。")
+            if self.redo_after_training_cancel:
+                self.redo_after_training_cancel = False
+                if self.practice_path is not None:
+                    (self.practice_path.parent / "adaptation-report.json").unlink(missing_ok=True)
+                    (self.practice_path.parent / "cnvsrc-personal-candidate.pth").unlink(missing_ok=True)
+                self._redo_previous_adaptation()
+            elif code == 0:
+                self._update_adaptation()
+                state = self.bridge.adaptation
+                candidate = Path(str(state.get("candidate") or ""))
+                if candidate.is_file():
+                    self._switch_adaptation_model(candidate, "训练完成，已切换到个人模型。")
+                else:
+                    self._update_adaptation("训练已结束，但没有找到个人模型文件。请查看本轮 training.log。")
             else:
                 self._update_adaptation("训练失败。请查看本轮采集目录中的 training.log。")
         if self.preview_future is not None:
@@ -1528,7 +1783,8 @@ class QtHudApp(QObject):
                         self.live_text = text
                         self.bridge.set_hud(
                             "listening",
-                            "正在录制",
+                            f"个人适配采集 {self.practice_index + 1}/24"
+                            if self._active_practice_phrase else "正在录制",
                             f"请读：{self._active_practice_phrase['text']}" if self._active_practice_phrase else f"实时识别：{text}",
                         )
                 except Exception:
@@ -1559,7 +1815,9 @@ class QtHudApp(QObject):
 
                 if result.get("practice_sample_file"):
                     self.practice_index += 1
-                    self._update_adaptation("24 句已保存，可以开始训练。" if self.practice_index >= 24 else "")
+                    self._update_adaptation()
+                    if self.practice_index >= 24:
+                        self._train_adaptation()
 
                 self._active_media_file = media_file
                 media_status = str(result.get("media_status") or "not_available")
@@ -1651,8 +1909,15 @@ class QtHudApp(QObject):
                     QTimer.singleShot(4000, lambda current=session: self._restore_home(current))
                 else:
                     self.mode = "result"
-                    self.bridge.set_hud("result", "完成", f"识别结果：{text}")
+                    title = (
+                        f"个人适配采集 {self._active_practice_phrase['id']}/24"
+                        if self._active_practice_phrase else "完成"
+                    )
+                    self.bridge.set_hud("result", title, f"识别结果：{text}")
                     QTimer.singleShot(3000, lambda current=session: self._restore_home(current))
+                # Refresh the main adaptation page as soon as recognition is
+                # complete. The HUD result has a separate display timeout.
+                self._update_adaptation()
                 print(f"[mvp-hud] {output_action}: {text}")
 
         if self.retranscribe_future is not None:
@@ -1788,7 +2053,8 @@ class QtHudApp(QObject):
                         self.mode = "listening"
                         self.bridge.set_hud(
                             "listening",
-                            "正在录制",
+                            f"个人适配采集 {self.practice_index + 1}/24"
+                            if self._active_practice_phrase else "正在录制",
                             f"请读：{self._active_practice_phrase['text']}" if self._active_practice_phrase else "实时识别：等待识别内容",
                         )
                 elif kind == "error" and self.mode in ("starting_camera", "listening", "processing"):

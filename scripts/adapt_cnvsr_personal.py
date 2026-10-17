@@ -199,19 +199,18 @@ def main() -> int:
     after = evaluate(recognizer, heldout_samples)
     improved = after["cer"] < before["cer"]
     candidate_path = session_dir / "cnvsrc-personal-candidate.pth"
-    if improved:
-        with tempfile.NamedTemporaryFile(dir=session_dir, suffix=".tmp", delete=False) as tmp:
-            temporary_path = Path(tmp.name)
-        try:
-            torch.save(model.state_dict(), temporary_path)
-            os.replace(temporary_path, candidate_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
+    with tempfile.NamedTemporaryFile(dir=session_dir, suffix=".tmp", delete=False) as tmp:
+        temporary_path = Path(tmp.name)
+    try:
+        torch.save(model.state_dict(), temporary_path)
+        os.replace(temporary_path, candidate_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
     report = {
         "experiment": "cnvsrc-personal-adaptation-v0.1",
         "base_checkpoint": str(checkpoint),
-        "candidate_checkpoint": str(candidate_path) if improved else None,
+        "candidate_checkpoint": str(candidate_path),
         "device": device,
         "epochs": args.epochs,
         "learning_rate": args.learning_rate,
@@ -232,7 +231,7 @@ def main() -> int:
         "after_cer": after["cer"],
         "before_exact": before["exact_sentences"],
         "after_exact": after["exact_sentences"],
-        "candidate_saved": improved,
+        "candidate_saved": True,
         "report": str(report_path),
     }, ensure_ascii=False, indent=2))
     return 0

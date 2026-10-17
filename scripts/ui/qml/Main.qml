@@ -22,6 +22,7 @@ ApplicationWindow {
     color: "#f6f8f7"
     property bool maximizedByButton: false
     property bool adaptationPage: false
+    onAdaptationPageChanged: bridge.setAdaptationPageActive(adaptationPage)
 
     function clampWindowPosition() {
         x = Math.max(0, Math.min(x, Math.max(0, Screen.width - width)))
@@ -611,8 +612,12 @@ ApplicationWindow {
                             width: parent.width - 46
                             spacing: 14
                             Text {
-                                text: bridge.adaptation.count >= 24
-                                      ? "24 句采集已完成"
+                                text: bridge.adaptation.training
+                                      ? "24 句采集完成 · 正在训练"
+                                      : bridge.adaptation.beforeCer >= 0
+                                        ? "本轮训练已完成"
+                                        : bridge.adaptation.count >= 24
+                                          ? "24 句采集已完成"
                                       : "请按顺序朗读 · 第 " + Math.min(24, bridge.adaptation.count + 1) + " 句"
                                 color: "#64777a"
                                 font.family: "Inter"
@@ -620,9 +625,15 @@ ApplicationWindow {
                             }
                             Text {
                                 width: parent.width
-                                text: bridge.adaptation.phrase.length > 0
-                                      ? bridge.adaptation.phrase
-                                      : (bridge.adaptation.count >= 24 ? "可以开始训练并比较效果" : "请先等待识别模型就绪")
+                                text: bridge.adaptation.switching
+                                      ? "正在加载所选模型，请稍候"
+                                      : bridge.adaptation.training
+                                        ? "正在训练个人模型，并比较 6 句留出数据"
+                                        : bridge.adaptation.beforeCer >= 0
+                                          ? "可以选择当前使用的模型，或重新开始一轮"
+                                          : bridge.adaptation.phrase.length > 0
+                                            ? bridge.adaptation.phrase
+                                            : (bridge.adaptation.count >= 24 ? "正在准备训练" : "请先等待识别模型就绪")
                                 color: "#26383a"
                                 font.family: "Inter"
                                 font.pixelSize: 20
@@ -637,6 +648,7 @@ ApplicationWindow {
                     Row {
                         width: parent.width
                         spacing: 14
+                        visible: bridge.adaptation.count < 24 && !bridge.adaptation.training
 
                         Rectangle {
                             width: (parent.width - 14) / 2
@@ -659,7 +671,7 @@ ApplicationWindow {
                                 }
                                 Text {
                                     width: parent.width
-                                    text: "保持正面、光线稳定；按右 Ctrl 开始；成功保存后会显示下一句。"
+                                    text: "保持正面、光线稳定；先点击开始录制，之后可按右 Ctrl 继续；成功保存后会显示下一句。"
                                     color: "#64777a"
                                     font.family: "Inter"
                                     font.pixelSize: 12
@@ -734,37 +746,39 @@ ApplicationWindow {
 
                     Rectangle {
                         width: parent.width
-                        height: 94
+                        height: 104
                         radius: 16
                         color: "#ffffff"
                         border.color: "#dee8e5"
                         border.width: 1
+                        visible: bridge.adaptation.count < 24
+                                 || bridge.adaptation.training
+                                 || (bridge.adaptation.count >= 24
+                                     && bridge.adaptation.beforeCer < 0
+                                     && !bridge.adaptation.training
+                                     && bridge.adaptation.message.length > 0)
 
                         Button {
                             id: adaptationMainAction
                             x: 23
-                            y: 24
+                            y: 14
                             width: 180
-                            height: 46
+                            height: 42
                             padding: 0
+                            visible: bridge.adaptation.count < 24
                             enabled: bridge.adaptation.available
                                      && !bridge.adaptation.training
                                      && !bridge.adaptation.processing
-                                     && (bridge.adaptation.count < 24 || bridge.adaptation.beforeCer < 0)
                             background: Rectangle {
                                 radius: 12
                                 color: adaptationMainAction.enabled ? "#eaf4f1" : "#f1f5f4"
                             }
                             contentItem: Text {
-                                text: bridge.adaptation.training
-                                      ? "正在训练…"
-                                      : bridge.adaptation.processing
+                                text: bridge.adaptation.processing
                                         ? "正在识别…"
                                         : bridge.adaptation.recording
                                           ? "结束当前句"
-                                          : bridge.adaptation.count >= 24
-                                            ? (bridge.adaptation.beforeCer >= 0 ? "本轮已完成" : "训练并比较")
-                                            : "开始录制"
+                                          : "开始录制"
                                 color: "#286f70"
                                 font.family: "Inter"
                                 font.pixelSize: 12
@@ -773,11 +787,52 @@ ApplicationWindow {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             onClicked: {
-                                if (bridge.adaptation.count >= 24)
-                                    bridge.trainAdaptation()
-                                else
-                                    bridge.recordAdaptation()
+                                bridge.recordAdaptation()
                             }
+                        }
+
+                        Button {
+                            x: 23
+                            y: 63
+                            width: 180
+                            height: 27
+                            padding: 0
+                            visible: bridge.adaptation.count > 0
+                                     && (bridge.adaptation.count < 24 || bridge.adaptation.training)
+                                     && !bridge.adaptation.recording
+                                     && !bridge.adaptation.processing
+                                     && !bridge.adaptation.switching
+                            text: bridge.adaptation.training ? "返回第 24 句重录" : "返回上一句重录"
+                            onClicked: bridge.redoPreviousAdaptation()
+                        }
+
+                        Text {
+                            x: 23
+                            y: 18
+                            width: 180
+                            height: 50
+                            visible: bridge.adaptation.training || bridge.adaptation.switching
+                            text: bridge.adaptation.switching ? "正在加载所选模型…" : "正在训练模型…"
+                            color: "#286f70"
+                            font.family: "Inter"
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        Button {
+                            x: 23
+                            y: 18
+                            width: 180
+                            height: 50
+                            visible: bridge.adaptation.count >= 24
+                                     && bridge.adaptation.beforeCer < 0
+                                     && !bridge.adaptation.training
+                                     && !bridge.adaptation.switching
+                                     && bridge.adaptation.message.indexOf("失败") >= 0
+                            text: "重试训练"
+                            onClicked: bridge.trainAdaptation()
                         }
 
                         Column {
@@ -785,11 +840,14 @@ ApplicationWindow {
                             y: 22
                             width: parent.width - 240
                             spacing: 4
+                            visible: bridge.adaptation.count < 24
                             Text {
                                 width: parent.width
                                 text: bridge.adaptation.recording
                                       ? "正在录制；再次点击按钮或按右 Ctrl 结束"
-                                      : "也可按右 Ctrl 开始 / 结束"
+                                       : bridge.adaptation.captureArmed
+                                         ? "点击开始录制，或按右 Ctrl 开始 / 结束"
+                                         : "点击开始录制以进入个人适配采集"
                                 color: "#64777a"
                                 font.family: "Inter"
                                 font.pixelSize: 12
@@ -797,11 +855,7 @@ ApplicationWindow {
                             }
                             Text {
                                 width: parent.width
-                                text: bridge.adaptation.count >= 24
-                                      ? (bridge.adaptation.beforeCer >= 0
-                                         ? "已用 6 句留出数据完成比较"
-                                         : "录完 24 句后训练，再用 6 句留出数据比较效果")
-                                      : "录完 24 句后训练，再用 6 句留出数据比较效果"
+                                text: "录完 24 句后会自动训练，并用 6 句留出数据比较效果"
                                 color: "#64777a"
                                 font.family: "Inter"
                                 font.pixelSize: 12
@@ -813,6 +867,11 @@ ApplicationWindow {
                     Text {
                         width: parent.width
                         visible: bridge.adaptation.message.length > 0
+                                     && (bridge.adaptation.count < 24
+                                         || (bridge.adaptation.beforeCer < 0
+                                             && !bridge.adaptation.training
+                                             && !bridge.adaptation.switching)
+                                         || bridge.adaptation.message.indexOf("失败") >= 0)
                         text: bridge.adaptation.message
                         color: "#286f70"
                         font.family: "Inter"
@@ -822,12 +881,31 @@ ApplicationWindow {
 
                     Column {
                         width: parent.width
-                        visible: bridge.adaptation.count >= 24
-                        spacing: 12
+                        visible: bridge.adaptation.beforeCer >= 0
+                                 && !bridge.adaptation.training
+                                 && !bridge.adaptation.switching
+                        spacing: 0
 
                         Rectangle {
                             width: parent.width
-                            height: 136
+                            height: 34
+                            color: "transparent"
+                            Text {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "本轮训练已完成"
+                                color: "#286f70"
+                                font.family: "Inter"
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                            }
+                        }
+
+                        Item { width: 1; height: 16 }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 132
                             radius: 16
                             color: "#ffffff"
                             border.color: "#dee8e5"
@@ -857,10 +935,14 @@ ApplicationWindow {
                                 Text {
                                     width: parent.width
                                     text: bridge.adaptation.candidate.length > 0
-                                          ? "留出句指标改善，已生成候选模型；可手动启用。"
-                                          : (bridge.adaptation.beforeCer >= 0
-                                             ? "留出句没有改善，原模型仍为默认模型。"
-                                             : "只有留出句字符错误率下降时才保存候选模型。")
+                                          ? (bridge.adaptation.afterCer < bridge.adaptation.beforeCer
+                                             ? (bridge.adaptation.usingPersonal
+                                                ? "个人模型在这 6 句上错误率更低，当前已切换到个人模型。"
+                                                : "个人模型在这 6 句上错误率更低，当前仍使用原模型。")
+                                             : (bridge.adaptation.usingPersonal
+                                                ? "个人模型在这 6 句上错误率更高，当前仍使用个人模型；你可以切回原模型。"
+                                                : "个人模型在这 6 句上错误率更高，当前仍使用原模型。"))
+                                          : "没有生成个人模型，请查看训练日志。"
                                     color: "#64777a"
                                     font.family: "Inter"
                                     font.pixelSize: 12
@@ -872,32 +954,77 @@ ApplicationWindow {
                         Row {
                             spacing: 12
                             Button {
-                                text: "启用个人模型（重启后）"
-                                enabled: bridge.adaptation.candidate.length > 0 && !bridge.adaptation.training
-                                onClicked: bridge.activateAdaptation()
+                                text: bridge.adaptation.usingPersonal ? "切换回原模型" : "切换到个人模型"
+                                enabled: bridge.adaptation.candidate.length > 0 && !bridge.adaptation.switching
+                                onClicked: {
+                                    if (bridge.adaptation.usingPersonal)
+                                        bridge.resetAdaptationModel()
+                                    else
+                                        bridge.activateAdaptation()
+                                }
                             }
                             Button {
-                                text: "恢复原模型（重启后）"
-                                enabled: bridge.adaptation.active.length > 0
-                                onClicked: bridge.resetAdaptationModel()
-                            }
-                            Button {
-                                text: "新建下一轮"
-                                enabled: bridge.adaptation.count >= 24 && !bridge.adaptation.training
-                                onClicked: bridge.startAdaptation()
+                                id: restartTrainingButton
+                                enabled: !bridge.adaptation.training && !bridge.adaptation.switching
+                                background: Rectangle {
+                                    radius: 6
+                                    color: restartTrainingButton.enabled ? "#fff1f0" : "#f6f4f4"
+                                    border.color: "#e6b6b2"
+                                }
+                                contentItem: Row {
+                                    spacing: 6
+                                    anchors.centerIn: parent
+                                    Item {
+                                        width: 14
+                                        height: 16
+                                        Image {
+                                            id: restartTrashSource
+                                            anchors.fill: parent
+                                            source: Qt.resolvedUrl("../assets/myl-v2-delete.svg")
+                                            fillMode: Image.PreserveAspectFit
+                                            sourceSize: Qt.size(14, 16)
+                                        }
+                                        ColorOverlay {
+                                            anchors.fill: restartTrashSource
+                                            source: restartTrashSource
+                                            color: "#a94442"
+                                        }
+                                    }
+                                    Text {
+                                        text: "重新开始训练"
+                                        color: "#a94442"
+                                        font.pixelSize: 12
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                }
+                                onClicked: restartTrainingDialog.open()
                             }
                         }
 
                         Text {
                             width: parent.width
-                            text: "本次已加载：" + bridge.adaptation.loaded + "；下次默认启动："
-                                  + (bridge.adaptation.active.length > 0 ? "个人模型" : "原模型")
+                            text: "当前使用：" + (bridge.adaptation.usingPersonal ? "个人适配模型" : "原模型")
                             color: "#64777a"
                             font.family: "Inter"
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
                         }
                     }
+                }
+            }
+
+            Dialog {
+                id: restartTrainingDialog
+                title: "重新开始个人适配？"
+                modal: true
+                anchors.centerIn: parent
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                onAccepted: bridge.restartAdaptation()
+                Text {
+                    width: 360
+                    wrapMode: Text.WordWrap
+                    text: "这会删除本轮 24 句素材、比较报告和本轮个人模型，并从第 1 句重新采集。原始模型不会删除。此操作无法撤销。"
+                    color: "#4f5e60"
                 }
             }
         }
