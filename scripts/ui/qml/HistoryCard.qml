@@ -138,7 +138,7 @@ Rectangle {
                         anchors.fill: parent
                         radius: 10
                         color: copyAction.copied ? "#286f70"
-                                                 : (copyMouse.containsMouse ? "#eaf4f1" : "transparent")
+                                                 : (copyMouse.containsMouse ? "#eaf4f1" : "#00eaf4f1")
                         Behavior on color {
                             ColorAnimation {
                                 duration: 150

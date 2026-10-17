@@ -8,6 +8,7 @@ events onto Qt's GUI thread.
 from __future__ import annotations
 
 import hashlib
+import ctypes
 import json
 import os
 import queue
@@ -27,8 +28,8 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 import pyperclip
-from PySide6.QtCore import Property, QObject, QRect, QTimer, QUrl, Signal, Slot, Qt
-from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot, Qt
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QImage, QPixmap
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -710,14 +711,18 @@ class QtHudApp(QObject):
 
         # QApplication is still fully compatible with Qt Quick, and is needed
         # for the native Windows system-tray menu and icon.
+        self._set_windows_app_id()
         self.app = QApplication([sys.argv[0]])
         self.app.setApplicationName("Move Your Lips")
         self.app.setQuitOnLastWindowClosed(False)
+        ui_dir = Path(__file__).resolve().parent
+        qml_dir = ui_dir / "qml"
+        app_icon = self._load_app_icon(ui_dir / "assets" / "myl-app-icon.png")
+        self.app.setWindowIcon(app_icon)
         self.engine = QQmlApplicationEngine()
         self.engine.addImageProvider("camera", self.preview_provider)
         self.engine.rootContext().setContextProperty("bridge", self.bridge)
 
-        qml_dir = Path(__file__).resolve().parent / "qml"
         self.engine.load(QUrl.fromLocalFile(str(qml_dir / "Main.qml")))
         self.engine.load(QUrl.fromLocalFile(str(qml_dir / "HudOverlay.qml")))
         if len(self.engine.rootObjects()) < 2:
@@ -727,7 +732,11 @@ class QtHudApp(QObject):
             (obj for obj in self.engine.rootObjects() if obj.objectName() == "homeWindow"),
             None,
         )
-        self._setup_tray_icon(qml_dir / "assets" / "home-active.svg")
+        self._setup_tray_icon(app_icon)
+        try:
+            self._set_windows_window_icon(ui_dir / "assets" / "myl-app-icon.ico")
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            print(f"[mvp-hud] Windows taskbar icon could not be set: {exc}")
 
         self.modelsLoaded.connect(self._models_ready)
         self.modelFailed.connect(self._model_failed)
@@ -1113,30 +1122,57 @@ class QtHudApp(QObject):
         )
 
     @staticmethod
-    def _make_tray_icon(home_icon_path: Path) -> QIcon:
-        """Create a visible tray icon from the existing Home SVG asset."""
-        home_icon = QIcon(str(home_icon_path))
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
+    def _set_windows_app_id() -> None:
+        if os.name != "nt":
+            return
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        set_app_id = shell32.SetCurrentProcessExplicitAppUserModelID
+        set_app_id.argtypes = [ctypes.c_wchar_p]
+        set_app_id.restype = ctypes.c_long
+        result = set_app_id("MoveYourLips.Desktop")
+        if result != 0:
+            print(f"[mvp-hud] Windows AppUserModelID could not be set: {result}")
 
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#bfe7ef"))
-        painter.drawRoundedRect(1, 1, 30, 30, 8, 8)
-        home_icon.paint(
-            painter,
-            QRect(7, 7, 18, 18),
-            Qt.AlignmentFlag.AlignCenter,
-            QIcon.Mode.Normal,
-            QIcon.State.Off,
-        )
-        painter.end()
-        return QIcon(pixmap)
+    @staticmethod
+    def _load_app_icon(icon_path: Path) -> QIcon:
+        icon = QIcon()
+        for size in (16, 32):
+            small_icon_path = icon_path.with_name(f"myl-app-icon-{size}.png")
+            pixmap = QPixmap(str(small_icon_path))
+            if pixmap.isNull():
+                raise RuntimeError(f"应用图标加载失败：{small_icon_path}")
+            icon.addPixmap(pixmap)
+        pixmap = QPixmap(str(icon_path))
+        if pixmap.isNull():
+            raise RuntimeError(f"应用图标加载失败：{icon_path}")
+        icon.addPixmap(pixmap)
+        return icon
 
-    def _setup_tray_icon(self, home_icon_path: Path) -> None:
-        icon = self._make_tray_icon(home_icon_path)
-        self.app.setWindowIcon(icon)
+    def _set_windows_window_icon(self, icon_path: Path) -> None:
+        if os.name != "nt" or self.home_window is None:
+            return
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        load_image = user32.LoadImageW
+        load_image.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+                               ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        load_image.restype = ctypes.c_void_p
+        send_message = user32.SendMessageW
+        send_message.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                 ctypes.c_size_t, ctypes.c_void_p]
+        send_message.restype = ctypes.c_ssize_t
+        hwnd = int(self.home_window.winId())
+        small_icon = load_image(None, str(icon_path), 1, 16, 16, 0x10)
+        large_icon = load_image(None, str(icon_path), 1, 32, 32, 0x10)
+        if not small_icon or not large_icon:
+            print(f"[mvp-hud] Windows window icon could not be loaded: {icon_path}")
+            return
+        send_message(hwnd, 0x0080, 0, small_icon)
+        send_message(hwnd, 0x0080, 1, large_icon)
+        self._windows_icon_handles = (small_icon, large_icon)
+
+    def _setup_tray_icon(self, icon: QIcon) -> None:
+        if self.home_window is not None:
+            self.home_window.setIcon(icon)
 
         self.tray_icon = QSystemTrayIcon(icon, self.app)
         self.tray_icon.setToolTip("Move Your Lips")
@@ -1150,10 +1186,9 @@ class QtHudApp(QObject):
         exit_action.triggered.connect(self._quit_app)
         self.tray_icon.setContextMenu(self.tray_menu)
 
-        # On Windows this is the notification-area icon beside the clock.
-        # Keeping the guard makes the app usable in headless/test sessions.
-        if QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray_icon.show()
+        # Qt adds a visible tray icon when the system tray becomes available,
+        # even if it was unavailable during application startup.
+        self.tray_icon.show()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (

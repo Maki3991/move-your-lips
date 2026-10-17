@@ -19,7 +19,17 @@ ApplicationWindow {
     minimumWidth: Math.min(minimumHomeWidth, Screen.width - 80)
     minimumHeight: Math.min(minimumHomeHeight, Screen.height - 120)
     flags: Qt.Window | Qt.FramelessWindowHint
-    color: "#f6f8f7"
+    color: "transparent"
+    property int contentCornerRadius: 6
+    property int windowCornerRadius: visibility === Window.Maximized
+                                     || visibility === Window.FullScreen ? 0 : contentCornerRadius
+    property bool edgeResizeEnabled: visibility !== Window.Maximized
+                                     && visibility !== Window.FullScreen
+                                     && !maximizedByButton
+    background: Rectangle {
+        radius: homeWindow.windowCornerRadius
+        color: "#f6f8f7"
+    }
     property bool maximizedByButton: false
     property bool adaptationPage: false
     onAdaptationPageChanged: bridge.setAdaptationPageActive(adaptationPage)
@@ -98,6 +108,15 @@ ApplicationWindow {
         width: parent.width
         height: 54
         color: "#ffffff"
+        radius: homeWindow.windowCornerRadius
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: parent.height - homeWindow.windowCornerRadius
+            color: "#ffffff"
+        }
 
         MouseArea {
             anchors.fill: parent
@@ -115,10 +134,10 @@ ApplicationWindow {
 
             Image {
                 anchors.verticalCenter: parent.verticalCenter
-                source: Qt.resolvedUrl("../assets/myl-v2-brand.svg")
-                width: 10
-                height: 10
-                sourceSize: Qt.size(10, 10)
+                source: Qt.resolvedUrl("../assets/myl-app-icon-16.png")
+                width: 16
+                height: 16
+                sourceSize: Qt.size(16, 16)
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -155,6 +174,25 @@ ApplicationWindow {
                         color: controlMouse.containsMouse
                                ? (modelData.name === "Close" ? "#fbe9eb" : "#eaf4f1")
                                : "transparent"
+                        radius: modelData.name === "Close" ? homeWindow.windowCornerRadius : 0
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            width: parent.width - parent.radius
+                            height: parent.height
+                            color: parent.color
+                            visible: parent.radius > 0
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: parent.height - parent.radius
+                            color: parent.color
+                            visible: parent.radius > 0
+                        }
                     }
 
                     Image {
@@ -224,6 +262,24 @@ ApplicationWindow {
             width: 76
             height: parent.height
             color: "#ffffff"
+            radius: homeWindow.windowCornerRadius
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: parent.height - homeWindow.windowCornerRadius
+                color: "#ffffff"
+            }
+
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                width: homeWindow.windowCornerRadius
+                height: parent.height
+                color: "#ffffff"
+                visible: width > 0
+            }
 
             Rectangle {
                 id: homeButton
@@ -233,7 +289,7 @@ ApplicationWindow {
                 height: 50
                 radius: 20
                 color: !homeWindow.adaptationPage || homeButtonMouse.containsMouse
-                       ? "#eaf4f1" : "transparent"
+                       ? "#eaf4f1" : "#00eaf4f1"
                 Behavior on color {
                     ColorAnimation { duration: 180; easing.type: Easing.OutCubic }
                 }
@@ -270,7 +326,7 @@ ApplicationWindow {
                 Accessible.name: "个人适配"
                 radius: 20
                 color: homeWindow.adaptationPage || adaptationButtonMouse.containsMouse
-                       ? "#eaf4f1" : "transparent"
+                       ? "#eaf4f1" : "#00eaf4f1"
                 Behavior on color {
                     ColorAnimation { duration: 180; easing.type: Easing.OutCubic }
                 }
@@ -298,7 +354,40 @@ ApplicationWindow {
             width: parent.width - sidebar.width
             height: parent.height
             clip: true
-            color: "#f6f8f7"
+            color: "transparent"
+
+            // The white corner shows through the rounded gray content surface.
+            Rectangle {
+                width: homeWindow.contentCornerRadius
+                height: homeWindow.contentCornerRadius
+                color: "#ffffff"
+                visible: width > 0
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: homeWindow.contentCornerRadius
+                color: "#f6f8f7"
+            }
+
+            // Only the content area's upper-left corner is rounded inside the window.
+            Rectangle {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                width: homeWindow.contentCornerRadius
+                height: homeWindow.contentCornerRadius
+                color: "#f6f8f7"
+                visible: width > 0
+            }
+
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                width: homeWindow.contentCornerRadius
+                height: homeWindow.contentCornerRadius
+                color: "#f6f8f7"
+                visible: width > 0
+            }
 
             Item {
                 id: historyContent
@@ -337,30 +426,46 @@ ApplicationWindow {
                         }
                     }
 
-                    Rectangle {
-                        id: shortcutHint
+                    Row {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 188
+                        width: shortcutHint.width + spacing + openVideoFolderButton.width
                         height: 42
-                        radius: 12
-                        color: "#eaf4f1"
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 8
-                            Text {
-                                text: "右 Ctrl"
-                                color: "#286f70"
-                                font.family: "Inter"
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
+                        spacing: 12
+
+                        Rectangle {
+                            id: shortcutHint
+                            width: 188
+                            height: 42
+                            radius: 12
+                            color: "#eaf4f1"
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                Text {
+                                    text: "右 Ctrl"
+                                    color: "#286f70"
+                                    font.family: "Inter"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                }
+                                Text {
+                                    text: "开始识别"
+                                    color: "#64777a"
+                                    font.family: "Inter"
+                                    font.pixelSize: 13
+                                }
                             }
-                            Text {
-                                text: "开始识别"
-                                color: "#64777a"
-                                font.family: "Inter"
-                                font.pixelSize: 13
-                            }
+                        }
+
+                        AdaptationButton {
+                            id: openVideoFolderButton
+                            objectName: "openVideoFolderButton"
+                            width: implicitWidth
+                            height: 42
+                            tone: "secondary"
+                            text: "打开视频文件夹"
+                            onClicked: bridge.openStorageFolder()
                         }
                     }
                 }
@@ -471,608 +576,55 @@ ApplicationWindow {
                 }
             }
 
-            Flickable {
+            PersonalAdaptationPage {
                 id: adaptationContent
                 objectName: "adaptationContent"
+                adaptationBridge: bridge
                 visible: homeWindow.adaptationPage
                 width: Math.min(920, parent.width - 48)
                 height: parent.height
                 anchors.horizontalCenter: parent.horizontalCenter
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                contentHeight: adaptationColumn.y + adaptationColumn.implicitHeight + 24
-
-                Column {
-                    id: adaptationColumn
-                    x: 0
-                    y: adaptationContent.height < 760 ? 24 : 40
-                    width: parent.width
-                    spacing: 0
-
-                    Item {
-                        width: parent.width
-                        height: 55
-
-                        Column {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 5
-                            Text {
-                                text: "HOME  /  PERSONAL ADAPTATION"
-                                color: "#286f70"
-                                font.family: "Inter"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                            }
-                            Text {
-                                text: "个人适配"
-                                color: "#26383a"
-                                font.family: "Inter"
-                                font.pixelSize: 30
-                                font.weight: Font.DemiBold
-                                lineHeightMode: Text.FixedHeight
-                                lineHeight: 38
-                            }
-                        }
-
-                        Rectangle {
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 188
-                            height: 42
-                            radius: 12
-                            color: "#eaf4f1"
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: 8
-                                Text {
-                                    text: "24 句"
-                                    color: "#286f70"
-                                    font.family: "Inter"
-                                    font.pixelSize: 13
-                                    font.weight: Font.DemiBold
-                                }
-                                Text {
-                                    text: "训练 + 验证"
-                                    color: "#64777a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 13
-                                }
-                            }
-                        }
-                    }
-
-                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 24 }
-                    Rectangle { width: parent.width; height: 1; color: "#dee8e5" }
-                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 24 }
-
-                    Rectangle {
-                        id: adaptationProgressCard
-                        width: parent.width
-                        height: 82
-                        radius: 16
-                        color: "#ffffff"
-                        border.color: "#dee8e5"
-                        border.width: 1
-
-                        Row {
-                            x: 23
-                            y: 16
-                            width: parent.width - 46
-                            height: 20
-                            Text {
-                                width: parent.width / 2
-                                text: "24 句采集进度"
-                                color: "#26383a"
-                                font.family: "Inter"
-                                font.pixelSize: 14
-                                font.weight: Font.DemiBold
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            Text {
-                                width: parent.width / 2
-                                text: ("0" + Math.min(24, Math.max(1, bridge.adaptation.count + 1))).slice(-2) + " / 24"
-                                color: "#286f70"
-                                font.family: "Inter"
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                        }
-
-                        Rectangle {
-                            id: adaptationProgressTrack
-                            x: 23
-                            y: 50
-                            width: parent.width - 46
-                            height: 6
-                            radius: 3
-                            color: "#eaf4f1"
-                            Rectangle {
-                                width: parent.width * Math.min(24, Math.max(1, bridge.adaptation.count + 1)) / 24
-                                height: parent.height
-                                radius: 3
-                                color: "#286f70"
-                            }
-                        }
-                    }
-
-                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
-
-                    Rectangle {
-                        width: parent.width
-                        height: 113
-                        radius: 16
-                        color: "#ffffff"
-                        border.color: "#dee8e5"
-                        border.width: 1
-                        Column {
-                            x: 23
-                            y: 20
-                            width: parent.width - 46
-                            spacing: 14
-                            Text {
-                                text: bridge.adaptation.training
-                                      ? "24 句采集完成 · 正在训练"
-                                      : bridge.adaptation.beforeCer >= 0
-                                        ? "本轮训练已完成"
-                                        : bridge.adaptation.count >= 24
-                                          ? "24 句采集已完成"
-                                      : "请按顺序朗读 · 第 " + Math.min(24, bridge.adaptation.count + 1) + " 句"
-                                color: "#64777a"
-                                font.family: "Inter"
-                                font.pixelSize: 12
-                            }
-                            Text {
-                                width: parent.width
-                                text: bridge.adaptation.switching
-                                      ? "正在加载所选模型，请稍候"
-                                      : bridge.adaptation.training
-                                        ? "正在训练个人模型，并比较 6 句留出数据"
-                                        : bridge.adaptation.beforeCer >= 0
-                                          ? "可以选择当前使用的模型，或重新开始一轮"
-                                          : bridge.adaptation.phrase.length > 0
-                                            ? bridge.adaptation.phrase
-                                            : (bridge.adaptation.count >= 24 ? "正在准备训练" : "请先等待识别模型就绪")
-                                color: "#26383a"
-                                font.family: "Inter"
-                                font.pixelSize: 20
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-                        }
-                    }
-
-                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
-
-                    Row {
-                        width: parent.width
-                        spacing: 14
-                        visible: bridge.adaptation.count < 24 && !bridge.adaptation.training
-
-                        Rectangle {
-                            width: (parent.width - 14) / 2
-                            height: 144
-                            radius: 16
-                            color: "#ffffff"
-                            border.color: "#dee8e5"
-                            border.width: 1
-                            Column {
-                                x: 23
-                                y: 20
-                                width: parent.width - 46
-                                spacing: 12
-                                Text {
-                                    text: "录制提示"
-                                    color: "#26383a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 14
-                                    font.weight: Font.DemiBold
-                                }
-                                Text {
-                                    width: parent.width
-                                    text: "保持正面、光线稳定；先点击开始录制，之后可按右 Ctrl 继续；成功保存后会显示下一句。"
-                                    color: "#64777a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WordWrap
-                                }
-                                Text {
-                                    text: "嘴部样本与训练结果保存在本机。"
-                                    color: "#286f70"
-                                    font.family: "Inter"
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: (parent.width - 14) / 2
-                            height: 144
-                            radius: 16
-                            color: "#ffffff"
-                            border.color: "#dee8e5"
-                            border.width: 1
-                            Column {
-                                x: 23
-                                y: 20
-                                width: parent.width - 46
-                                spacing: 15
-                                Text {
-                                    text: "这 24 句如何使用"
-                                    color: "#26383a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 14
-                                    font.weight: Font.DemiBold
-                                }
-                                Row {
-                                    width: parent.width
-                                    spacing: 12
-                                    Rectangle {
-                                        width: (parent.width - 12) / 2
-                                        height: 42
-                                        radius: 10
-                                        color: "#eaf4f1"
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "18 句用于训练"
-                                            color: "#286f70"
-                                            font.family: "Inter"
-                                            font.pixelSize: 12
-                                            font.weight: Font.DemiBold
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: (parent.width - 12) / 2
-                                        height: 42
-                                        radius: 10
-                                        color: "#ffffff"
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "6 句只做验证"
-                                            color: "#286f70"
-                                            font.family: "Inter"
-                                            font.pixelSize: 12
-                                            font.weight: Font.DemiBold
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Item { width: 1; height: adaptationContent.height < 760 ? 16 : 23 }
-
-                    Rectangle {
-                        width: parent.width
-                        height: 104
-                        radius: 16
-                        color: "#ffffff"
-                        border.color: "#dee8e5"
-                        border.width: 1
-                        visible: bridge.adaptation.count < 24
-                                 || bridge.adaptation.training
-                                 || (bridge.adaptation.count >= 24
-                                     && bridge.adaptation.beforeCer < 0
-                                     && !bridge.adaptation.training
-                                     && bridge.adaptation.message.length > 0)
-
-                        Button {
-                            id: adaptationMainAction
-                            x: 23
-                            y: 14
-                            width: 180
-                            height: 42
-                            padding: 0
-                            visible: bridge.adaptation.count < 24
-                            enabled: bridge.adaptation.available
-                                     && !bridge.adaptation.training
-                                     && !bridge.adaptation.processing
-                            background: Rectangle {
-                                radius: 12
-                                color: adaptationMainAction.enabled ? "#eaf4f1" : "#f1f5f4"
-                            }
-                            contentItem: Text {
-                                text: bridge.adaptation.processing
-                                        ? "正在识别…"
-                                        : bridge.adaptation.recording
-                                          ? "结束当前句"
-                                          : "开始录制"
-                                color: "#286f70"
-                                font.family: "Inter"
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: {
-                                bridge.recordAdaptation()
-                            }
-                        }
-
-                        Button {
-                            x: 23
-                            y: 63
-                            width: 180
-                            height: 27
-                            padding: 0
-                            visible: bridge.adaptation.count > 0
-                                     && (bridge.adaptation.count < 24 || bridge.adaptation.training)
-                                     && !bridge.adaptation.recording
-                                     && !bridge.adaptation.processing
-                                     && !bridge.adaptation.switching
-                            text: bridge.adaptation.training ? "返回第 24 句重录" : "返回上一句重录"
-                            onClicked: bridge.redoPreviousAdaptation()
-                        }
-
-                        Text {
-                            x: 23
-                            y: 18
-                            width: 180
-                            height: 50
-                            visible: bridge.adaptation.training || bridge.adaptation.switching
-                            text: bridge.adaptation.switching ? "正在加载所选模型…" : "正在训练模型…"
-                            color: "#286f70"
-                            font.family: "Inter"
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        Button {
-                            x: 23
-                            y: 18
-                            width: 180
-                            height: 50
-                            visible: bridge.adaptation.count >= 24
-                                     && bridge.adaptation.beforeCer < 0
-                                     && !bridge.adaptation.training
-                                     && !bridge.adaptation.switching
-                                     && bridge.adaptation.message.indexOf("失败") >= 0
-                            text: "重试训练"
-                            onClicked: bridge.trainAdaptation()
-                        }
-
-                        Column {
-                            x: 217
-                            y: 22
-                            width: parent.width - 240
-                            spacing: 4
-                            visible: bridge.adaptation.count < 24
-                            Text {
-                                width: parent.width
-                                text: bridge.adaptation.recording
-                                      ? "正在录制；再次点击按钮或按右 Ctrl 结束"
-                                       : bridge.adaptation.captureArmed
-                                         ? "点击开始录制，或按右 Ctrl 开始 / 结束"
-                                         : "点击开始录制以进入个人适配采集"
-                                color: "#64777a"
-                                font.family: "Inter"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                            Text {
-                                width: parent.width
-                                text: "录完 24 句后会自动训练，并用 6 句留出数据比较效果"
-                                color: "#64777a"
-                                font.family: "Inter"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        visible: bridge.adaptation.message.length > 0
-                                     && (bridge.adaptation.count < 24
-                                         || (bridge.adaptation.beforeCer < 0
-                                             && !bridge.adaptation.training
-                                             && !bridge.adaptation.switching)
-                                         || bridge.adaptation.message.indexOf("失败") >= 0)
-                        text: bridge.adaptation.message
-                        color: "#286f70"
-                        font.family: "Inter"
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Column {
-                        width: parent.width
-                        visible: bridge.adaptation.beforeCer >= 0
-                                 && !bridge.adaptation.training
-                                 && !bridge.adaptation.switching
-                        spacing: 0
-
-                        Rectangle {
-                            width: parent.width
-                            height: 34
-                            color: "transparent"
-                            Text {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "本轮训练已完成"
-                                color: "#286f70"
-                                font.family: "Inter"
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                            }
-                        }
-
-                        Item { width: 1; height: 16 }
-
-                        Rectangle {
-                            width: parent.width
-                            height: 132
-                            radius: 16
-                            color: "#ffffff"
-                            border.color: "#dee8e5"
-                            border.width: 1
-                            Column {
-                                x: 23
-                                y: 20
-                                width: parent.width - 46
-                                spacing: 10
-                                Text {
-                                    text: "留出句比较（6 句）"
-                                    color: "#26383a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 14
-                                    font.weight: Font.DemiBold
-                                }
-                                Text {
-                                    width: parent.width
-                                    text: bridge.adaptation.beforeCer >= 0
-                                          ? "原模型字符错误率 " + bridge.adaptation.beforeCer + "%  →  调整后 " + bridge.adaptation.afterCer + "%"
-                                          : "训练完成后显示留出句比较结果"
-                                    color: "#64777a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 13
-                                    wrapMode: Text.WordWrap
-                                }
-                                Text {
-                                    width: parent.width
-                                    text: bridge.adaptation.candidate.length > 0
-                                          ? (bridge.adaptation.afterCer < bridge.adaptation.beforeCer
-                                             ? (bridge.adaptation.usingPersonal
-                                                ? "个人模型在这 6 句上错误率更低，当前已切换到个人模型。"
-                                                : "个人模型在这 6 句上错误率更低，当前仍使用原模型。")
-                                             : (bridge.adaptation.usingPersonal
-                                                ? "个人模型在这 6 句上错误率更高，当前仍使用个人模型；你可以切回原模型。"
-                                                : "个人模型在这 6 句上错误率更高，当前仍使用原模型。"))
-                                          : "没有生成个人模型，请查看训练日志。"
-                                    color: "#64777a"
-                                    font.family: "Inter"
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-                        }
-
-                        Row {
-                            spacing: 12
-                            Button {
-                                text: bridge.adaptation.usingPersonal ? "切换回原模型" : "切换到个人模型"
-                                enabled: bridge.adaptation.candidate.length > 0 && !bridge.adaptation.switching
-                                onClicked: {
-                                    if (bridge.adaptation.usingPersonal)
-                                        bridge.resetAdaptationModel()
-                                    else
-                                        bridge.activateAdaptation()
-                                }
-                            }
-                            Button {
-                                id: restartTrainingButton
-                                enabled: !bridge.adaptation.training && !bridge.adaptation.switching
-                                background: Rectangle {
-                                    radius: 6
-                                    color: restartTrainingButton.enabled ? "#fff1f0" : "#f6f4f4"
-                                    border.color: "#e6b6b2"
-                                }
-                                contentItem: Row {
-                                    spacing: 6
-                                    anchors.centerIn: parent
-                                    Item {
-                                        width: 14
-                                        height: 16
-                                        Image {
-                                            id: restartTrashSource
-                                            anchors.fill: parent
-                                            source: Qt.resolvedUrl("../assets/myl-v2-delete.svg")
-                                            fillMode: Image.PreserveAspectFit
-                                            sourceSize: Qt.size(14, 16)
-                                        }
-                                        ColorOverlay {
-                                            anchors.fill: restartTrashSource
-                                            source: restartTrashSource
-                                            color: "#a94442"
-                                        }
-                                    }
-                                    Text {
-                                        text: "重新开始训练"
-                                        color: "#a94442"
-                                        font.pixelSize: 12
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                }
-                                onClicked: restartTrainingDialog.open()
-                            }
-                        }
-
-                        Text {
-                            width: parent.width
-                            text: "当前使用：" + (bridge.adaptation.usingPersonal ? "个人适配模型" : "原模型")
-                            color: "#64777a"
-                            font.family: "Inter"
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-                }
-            }
-
-            Dialog {
-                id: restartTrainingDialog
-                title: "重新开始个人适配？"
-                modal: true
-                anchors.centerIn: parent
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                onAccepted: bridge.restartAdaptation()
-                Text {
-                    width: 360
-                    wrapMode: Text.WordWrap
-                    text: "这会删除本轮 24 句素材、比较报告和本轮个人模型，并从第 1 句重新采集。原始模型不会删除。此操作无法撤销。"
-                    color: "#4f5e60"
-                }
             }
         }
     }
 
-    // The window is frameless, so provide an explicit resize target at the
-    // bottom-right corner instead of relying on the hidden native frame.
-    Item {
-        id: resizeGrip
-        width: 18
-        height: 18
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        z: 100
+    // Keep the resize zones narrow so buttons and scrollable content remain usable.
+    Repeater {
+        model: [
+            { name: "left", edges: Qt.LeftEdge, cursor: Qt.SizeHorCursor },
+            { name: "right", edges: Qt.RightEdge, cursor: Qt.SizeHorCursor },
+            { name: "top", edges: Qt.TopEdge, cursor: Qt.SizeVerCursor },
+            { name: "bottom", edges: Qt.BottomEdge, cursor: Qt.SizeVerCursor },
+            { name: "topLeft", edges: Qt.TopEdge | Qt.LeftEdge, cursor: Qt.SizeFDiagCursor },
+            { name: "topRight", edges: Qt.TopEdge | Qt.RightEdge, cursor: Qt.SizeBDiagCursor },
+            { name: "bottomLeft", edges: Qt.BottomEdge | Qt.LeftEdge, cursor: Qt.SizeBDiagCursor },
+            { name: "bottomRight", edges: Qt.BottomEdge | Qt.RightEdge, cursor: Qt.SizeFDiagCursor }
+        ]
 
-        Rectangle {
-            width: 2
-            height: 9
-            radius: 1
-            color: "#89beb8"
-            rotation: 45
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 4
-            anchors.bottomMargin: 4
-        }
+        delegate: MouseArea {
+            required property var modelData
+            readonly property bool horizontalEdge: modelData.name === "top" || modelData.name === "bottom"
+            readonly property bool verticalEdge: modelData.name === "left" || modelData.name === "right"
+            readonly property bool rightSide: modelData.name === "right" || modelData.name === "topRight"
+                                              || modelData.name === "bottomRight"
+            readonly property bool bottomSide: modelData.name === "bottom" || modelData.name === "bottomLeft"
+                                               || modelData.name === "bottomRight"
+            readonly property int edgeWidth: 7
+            readonly property int cornerWidth: 14
 
-        Rectangle {
-            width: 2
-            height: 6
-            radius: 1
-            color: "#89beb8"
-            rotation: 45
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 4
-            anchors.bottomMargin: 9
-        }
-
-        MouseArea {
-            id: resizeMouse
-            anchors.fill: parent
+            x: horizontalEdge ? cornerWidth : (rightSide ? parent.width - width : 0)
+            y: verticalEdge ? cornerWidth : (bottomSide ? parent.height - height : 0)
+            width: horizontalEdge ? parent.width - 2 * cornerWidth
+                                  : (verticalEdge ? edgeWidth : cornerWidth)
+            height: verticalEdge ? parent.height - 2 * cornerWidth
+                                 : (horizontalEdge ? edgeWidth : cornerWidth)
+            visible: homeWindow.edgeResizeEnabled
+            enabled: visible
+            z: 100
             hoverEnabled: true
-            cursorShape: Qt.SizeFDiagCursor
-            ToolTip.visible: containsMouse
-            ToolTip.text: "拖动调整窗口大小"
-            ToolTip.delay: 650
-            onPressed: homeWindow.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+            acceptedButtons: Qt.LeftButton
+            cursorShape: modelData.cursor
+            onPressed: homeWindow.startSystemResize(modelData.edges)
         }
     }
 
