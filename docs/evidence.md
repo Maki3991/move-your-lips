@@ -1,9 +1,9 @@
 # Evidence：决策、实验、AI 协作与结果
 
 **文档用途**：记录这个项目中可以被复查的事实、决策、实验结果和贡献边界。  
-**最后更新**：2026-10-16
+**最后更新**：2026-10-18
 
-**当前阶段**：MVP 实时交互原型已运行；CNVSRC2025 原模型与 CMLR + 中文语言模型复测均未达到可理解句子的标准。一次 24 句个人适配的 6 句留出集 CER 有小幅下降，但仍是 0/6 完整正确；候选权重尚待原 10 句复测验收。
+**当前阶段**：MVP 实时交互原型已运行；CNVSRC2025 原模型与 CMLR + 中文语言模型复测均未达到可靠识别标准。24 句个人适配及原 10 句复测已完成；另录 10 句的同素材对照显示字级改善，但原模型和个人模型均为 0/10 整句正确。详见 `docs/archived-experiments/`。
 
 这不是流水账，也不是所有 AI 对话的备份。真正有价值的是：我做了什么判断、依据是什么、AI 做了什么、结果如何、下一步因此发生了什么变化。
 
@@ -48,7 +48,7 @@
 
 ### 2026-10-10：当前采用三份主动维护文档
 
-- **决策**：暂时只维护 `README.md`、`docs/design-thinking.md` 和 `docs/evidence.md`。
+- **当时的决策**：先维护 `README.md`、`docs/product/design-thinking.md` 和 `docs/evidence.md`；后续版本文档已按用途分组，见 `docs/README.md`。
 - **原因**：README 和 Product Brief 的职责高度重叠；MVP 验证计划要等 Prototype 范围冻结；模型研究属于技术决策证据，不需要单独成为产品主文档。
 - **保留边界**：Prototype scope 虽已冻结，但 PRD 等固定视频 P0 完成并决定进入实时摄像头 MVP 后再建立；模型研究在需要作技术选型时继续补充到本文件。
 - **结果**：当前文档结构从四个并行文件收敛到一个对外入口、一个设计过程文件和一个证据文件。
@@ -57,7 +57,7 @@
 
 - 类型：实验 / 结果 / 决策
 - 问题：将实时识别模型切换为新下载的 CMLR 中文模型后，是否比原 CNVSRC2025 更能识别预设的 10 句话？
-- 可观察输入与条件：同一组 10 句话，每句计划测试 3 次；CMLR `CMLR_V_WER8.0` checkpoint + `lm_zh`，CPU，beam size 20、CTC weight 0.1、LM weight 0.3，camera 0、MobileNet 0.25。成功结果记录于 `outputs/mvp/recognitions.jsonl`，逐条结果及 CER 见 `docs/v0.3-baseline-test.md`。
+- 可观察输入与条件：同一组 10 句话，每句计划测试 3 次；CMLR `CMLR_V_WER8.0` checkpoint + `lm_zh`，CPU，beam size 20、CTC weight 0.1、LM weight 0.3，camera 0、MobileNet 0.25。成功结果记录于 `outputs/mvp/recognitions.jsonl`，逐条结果及 CER 见 `docs/archived-experiments/v0.3-baseline-test.md`。
 - 我的决策或工作：依据完整 30 条输出和用户对结果的复核，决定不采用 CMLR，并恢复 CNVSRC2025；保留原始 CMLR 测试数据供后续复查。
 - AI / 上游资源协助：AI 协助排查模型切换、核对保存的嘴部素材与预处理路径、汇总日志并更新测试记录；CMLR 仓库提供视觉模型、中文语言模型及解码配置。
 - 结果：30 条有效文字输出中整句完全正确 0/30，CER 127.40%（字符编辑距离 451 / 参考文本 354 字符）；用户反馈没有一句完整正确且整体与原句基本无关。另有 1 次 `TOO SHORT (0 frames)` 采集失败，是否计入原定 30 次计划尚未核实，因此不能把有效输出数直接视作端到端完成率。语义评分没有按 0—3 标准逐条正式打分。
@@ -72,7 +72,7 @@
 - 可观察输入与条件：24 句均有无损 96×96 RGB 嘴部帧；18 train、6 heldout。CPU 上训练 3 轮、学习率 `1e-5`；留出句在训练前后使用同一批录制素材和 CNVSRC 解码器评估。
 - 我的决策或工作：用户录制并提供已知原句；选择先做一轮有限个人适配。AI 建立采集/校验/训练/评估流程，保持 6 条留出样本不参与梯度更新，也没有覆盖原 checkpoint。
 - 结果：留出集训练前 CER `27/58 = 46.55%`、整句正确 `0/6`；训练后 `24/58 = 41.38%`、整句正确仍为 `0/6`。3 句的编辑距离下降，2 句上升，1 句不变。候选权重已通过应用模型加载自检。
-- 证据位置：`docs/personal-adaptation-v0.1.md`；`outputs/mvp/personal_adaptation/session-9def7aa4-6fef-41b2-850c-6bff39c43854/adaptation-report.json`；同目录候选 checkpoint 与 `manifest.jsonl`。
+- 证据位置：`docs/archived-experiments/personal-adaptation-v0.1.md`；`outputs/mvp/personal_adaptation/session-9def7aa4-6fef-41b2-850c-6bff39c43854/adaptation-report.json`；同目录候选 checkpoint 与 `manifest.jsonl`。
 - 结论：本轮有小幅字符级改善，但没有完整可用句子，不能据此宣布个人模型已成功或切换默认版本。候选权重单独保存，原模型仍是默认版本。
 - 未验证项：在原 10 句 × 3 次复测中是否有改善；结果是否能推广到未见句子、其他光线或不同日期录制。
 - 下一步：用户用候选 checkpoint 重测原 10 句并填入 v0.4 优化后复测表；根据 CER、整句正确数和逐句结果决定保留或弃用候选。
@@ -104,11 +104,11 @@
 
 - 类型：实验 / 结果 / 决策
 - 问题：标准普通话新闻播音员、稳定正面机位的视频，能否让当前中文视觉语音模型达到可用识别效果？
-- 可观察输入与条件：`test-videos/3/` 下 5 段视频；1920×1080；30 FPS；单人正面画面；3 条长句、2 条短句；标准答案记录在 `docs/line.md`。
+- 可观察输入与条件：`test-videos/3/` 下 5 段视频；1920×1080；30 FPS；单人正面画面；3 条长句、2 条短句；标准答案记录在 `docs/archived-experiments/news-anchor-five-sentences.md`。
 - 我的决策或工作：停止继续扩展当前模型测试；使用与本人视频完全相同的 CNVSRC2025 MobileNet 人脸检测、FAN 关键点、96×96 嘴部裁剪和真实 30→25 FPS 重采样流程，建立新闻播音员外部基准。
 - AI / 上游资源协助：AI 协助复用已验证的预处理脚本、补齐 5 段标签 CSV、运行 CPU 推理并整理 CER；CNVSRC2025 提供推理代码、模型结构和权重。
 - 结果：5 段视频均完成全帧人脸/关键点检测；总编辑错误 `87/170`，总 CER `51.18%`。三条长句为 `74/150 = 49.33%`，两条短句为 `13/20 = 65.00%`。嘴部裁剪位置正常，未发现明显预处理失败。
-- 证据位置：`test-results/cnvsrc2025/news-reference/result-summary.md`；`test-results/cnvsrc2025/news-reference/groundtruth.csv`；`test-results/cnvsrc2025/news-reference/prediction.json`；5 个 `*-lips-960-mobile-resampled.mp4`；`docs/line.md`。
+- 证据位置：`test-results/cnvsrc2025/news-reference/result-summary.md`；`test-results/cnvsrc2025/news-reference/groundtruth.csv`；`test-results/cnvsrc2025/news-reference/prediction.json`；5 个 `*-lips-960-mobile-resampled.mp4`；`docs/archived-experiments/news-anchor-five-sentences.md`。
 - 结论：新闻播音员素材也未达到可用中文唇语输入标准；当前问题不能仅归因于用户发音或自拍视频质量。继续测试同一模型的边际收益较低，暂时归档更合理。
 - 未验证项：未来新中文模型、个人适配训练和实时摄像头输入仍未验证；本次结论不代表中文唇语识别研究已经没有突破空间。
 - 下一步：暂停当前项目的主动开发和模型测试；保留仓库与证据，待新的中文模型或明显更强的公开基线出现后，从本节结果继续比较。
@@ -119,9 +119,9 @@
 - 问题：固定视频技术链路虽然已经跑通，但用户仍然需要手机录制、导出或传输视频，再手动执行识别；这没有验证“在电脑前直接完成一次无声输入”的产品闭环。
 - 可观察输入与条件：User 0 明确把“按 hotkey 控制摄像头，完成一次唇语识别并得到文本”列为当前最高优先级；准确率可以继续优化，但不再作为实现实时交互的前置条件。
 - 我的决策或工作：把 MVP v0.1 收敛为“启动介绍页（摄像头关闭）→ 按住 F9 启动摄像头并录制 → 松开关闭摄像头 → CNVSRC2025 最终识别 → 复制到剪贴板”，暂不做系统级输入法、自动粘贴、音频和 LLM 润色。
-- AI / 上游资源协助：AI 根据已验证的 CNVSRC2025 预处理和权重，新增 `scripts/lip_input_mvp.py`、启动脚本和 `docs/mvp-prd.md`；CNVSRC2025 提供模型、权重、RetinaFace/FAN 预处理和解码组件。
+- AI / 上游资源协助：AI 根据已验证的 CNVSRC2025 预处理和权重，新增 `scripts/lip_input_mvp.py`、启动脚本和 `docs/product/mvp-prd.md`；CNVSRC2025 提供模型、权重、RetinaFace/FAN 预处理和解码组件。
 - 结果：模型自检已通过，确认代码能够加载 CNVSRC2025 权重并初始化实时识别所需组件；真实摄像头录制、快捷键事件、最终识别耗时和剪贴板结果尚未完成验收。
-- 证据位置：`scripts/lip_input_mvp.py`；`scripts/run_lip_input_mvp.ps1`；`docs/mvp-prd.md`；本条记录；运行时生成的 `outputs/mvp/recognitions.jsonl`。
+- 证据位置：`scripts/lip_input_mvp.py`；`scripts/run_lip_input_mvp.ps1`；`docs/product/mvp-prd.md`；本条记录；运行时生成的 `outputs/mvp/recognitions.jsonl`。
 - 结论：当前可以诚实地说“实时 MVP 已进入实现并通过模型自检”，还不能说“唇语输入法已经可用”或“准确率已经解决”。
 - 未验证项：摄像头在用户实际姿态下是否稳定检测；F9 按下/松开是否符合预期；CPU 端实时反馈延迟；最终识别是否能复制到剪贴板；连续使用时的失败率。
 - 下一步：启动 MVP，完成至少 3 次真实录制；记录每次是否成功、帧数、最终耗时、输出文本和失败原因，再决定先优化交互还是先优化预处理/模型。
@@ -153,8 +153,8 @@
 - Home 页面迭代：移除侧栏中的录制入口和 `Local only` 文案；历史卡片增加再次复制，工具栏增加打开本地存储文件夹；去掉大尺寸 Refresh，改为文件变化自动刷新和 `Ctrl+R` 手动刷新。
 - 我的决策或工作：将 MVP v0.2 拆成产品体验线和模型诊断线。产品线做 Home 历史功能梳理、再次复制和显式开启的当前窗口粘贴；模型线建立至少 10 句话 × 3 次的标准答案测试集，并对照固定视频离线、实时录制后离线和实时最终识别三条路径。
 - AI / 上游资源协助：AI 协助整理 MVP v0.2 PRD、验收边界和实验字段；当前没有替换模型，也没有声称完成个人微调。
-- 结果：MVP v0.2 的范围已写入 `docs/mvp-prd.md`；代码实现和模型实验尚未因本条记录自动完成。
-- 证据位置：`docs/mvp-prd.md`；`README.md`；`docs/design-thinking.md`；`scripts/lip_input_hud.py`；`outputs/mvp/recognitions.jsonl`。
+- 结果：MVP v0.2 的范围已写入 `docs/product/mvp-prd.md`；代码实现和模型实验尚未因本条记录自动完成。
+- 证据位置：`docs/product/mvp-prd.md`；`README.md`；`docs/product/design-thinking.md`；`scripts/lip_input_hud.py`；`outputs/mvp/recognitions.jsonl`。
 - 结论：可以诚实地说“MVP v0.1 的交互闭环已完成，识别质量未通过验收，MVP v0.2 已进入迭代规划”；不能把“换模型”或“24 句校准”写成必然有效方案。
 - 未验证项：实时识别失败究竟来自模型域差异、嘴部裁剪/对齐、抽帧与时间序列、实时缓冲，还是多个因素叠加；直接粘贴在不同活动窗口下是否安全。
 - 下一步：先完成三条路径的受控基线，再决定修预处理、换模型或尝试个人适配；产品线可并行实现显式开启的直接输入。
@@ -165,7 +165,7 @@
 - 本人的工作：按预先列出的 10 个新句子各录一次，并保留所有实时识别结果。10 条记录均显示 `cnvsrc-personal-candidate.pth`，嘴部 MP4 均已保存。
 - AI 协助：从历史记录核对句子顺序、模型版本和素材文件；用相同的 10 份 MP4 分别离线运行原 CNVSRC 和个人适配候选模型，填写逐句对照表并计算 CER。
 - 结果：原模型离线 CER 为 `73/132 = 55.30%`，候选模型为 `60/132 = 45.45%`；候选模型 6 句改善、4 句变差，两者整句正确均为 `0/10`。候选模型现场实时输出整句正确也是 `0/10`，CER 为 `55/132 = 41.67%`。
-- 证据位置：`docs/unseen-sentence-check-v0.1.md`；`outputs/mvp/offline_diagnostic/unseen-sentence-check-v0.1.json`；`scripts/compare_unseen_models.py`；原始嘴部视频在 `outputs/mvp/recordings/`，录制历史在 `outputs/mvp/recognitions.jsonl`。
+- 证据位置：`docs/archived-experiments/unseen-sentence-check-v0.1.md`；`outputs/mvp/offline_diagnostic/unseen-sentence-check-v0.1.json`；`scripts/compare_unseen_models.py`；原始嘴部视频在 `outputs/mvp/recordings/`，录制历史在 `outputs/mvp/recognitions.jsonl`。
 - 判断边界：相同 MP4 对照支持有限的字级改善，但素材是压缩过的嘴部视频，每句仅录一次，且无一句完整正确。保留候选 checkpoint 供研究；程序默认模型暂不变更，不把本轮结果写成日常识别可用。
 
 ## 4. 技术研究记录：模型不是产品结论

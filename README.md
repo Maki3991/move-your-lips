@@ -82,26 +82,26 @@ CER 是字符错误率。
 | 24 句中的 6 句留出句，两模型识别同一批无损嘴部帧  |  46.55%（27/58） |  41.38%（24/58） | 两者均 0/6  | 页面训练报告显示的结果      |
 | 另外录的 10 句新句子，两模型识别同一批嘴部 MP 4 | 55.30%（73/132） | 45.45%（60/132） | 两者均 0/10 | 认对的字多了，仍没有一句完全正确 |
 
-我们还让同一人用原模型读了 10 句、每句 3 次：CER 为 60.45%，30 次中有 1 次整句正确。训练后，他在另一天重读这些句子，CER 为 51.13%，整句正确 3/30。两天的机位和光线没有固定，所以这组现场数据不能单独证明训练带来了多少改善。每句原文、输出和计算口径见[基线与复测](docs/v0.3-baseline-test.md)、[个人适配实验](docs/personal-adaptation-v0.1.md)、[新句子对照](docs/unseen-sentence-check-v0.1.md)。
+我们还让同一人用原模型读了 10 句、每句 3 次：CER 为 60.45%，30 次中有 1 次整句正确。训练后，他在另一天重读这些句子，CER 为 51.13%，整句正确 3/30。两天的机位和光线没有固定，所以这组现场数据不能单独证明训练带来了多少改善。每句原文、输出和计算口径见[基线与复测](docs/archived-experiments/v0.3-baseline-test.md)、[个人适配实验](docs/archived-experiments/personal-adaptation-v0.1.md)、[新句子对照](docs/archived-experiments/unseen-sentence-check-v0.1.md)。
 
 ### 测自己的模型
 
 训练页面会显示 6 句留出句的 CER。如果你还想知道模型遇到新句子时怎么样，先写下至少 10 句未用于训练的句子，每句录一次。认错了也留下原结果，别挑最好的一次。然后让原模型和个人模型读取**同一份**嘴部视频，并保持预处理、解码参数一致。分别统计 CER、整句正确数和失败次数。这样，两模型不会因为你读了两遍、换了光线而拿到不同输入。
 
-你可以参考我们的 [10 句对照记录](docs/unseen-sentence-check-v0.1.md) 和 `scripts/compare_unseen_models.py`。这份脚本只处理该记录的格式，没有通用测评界面。保存的 MP 4 经过压缩，离线结果也不能直接代替实时识别结果。
+你可以参考我们的 [10 句对照记录](docs/archived-experiments/unseen-sentence-check-v0.1.md) 和 `scripts/compare_unseen_models.py`。这份脚本只处理该记录的格式，没有通用测评界面。保存的 MP 4 经过压缩，离线结果也不能直接代替实时识别结果。
 
 6 句留出句一共只有 58 个字。多错几个字，就会让 CER 变动好几个百分点；如果留出 CER 变差，建议再看新句子的对照。要知道其他用户会得到什么结果，还需要请不同的人各自录制、测试，并记下录制条件。
 
 ### 识别为什么还不准
 
-我们曾把一条录制的实时输入和无损嘴部帧分别送进模型，得到相同结果；抽查画面和代码时，也没看到嘴部裁剪、尺寸或帧率有明显错误。你可以在[输入诊断](docs/v0.4-input-diagnostic.md)里看到那次的画面和输出。但我们只细查了这一条，不能据此认定整条输入流程都没有问题。
+我们曾把一条录制的实时输入和无损嘴部帧分别送进模型，得到相同结果；抽查画面和代码时，也没看到嘴部裁剪、尺寸或帧率有明显错误。你可以在[输入诊断](docs/archived-experiments/v0.4-input-diagnostic.md)里看到那次的画面和输出。但我们只细查了这一条，不能据此认定整条输入流程都没有问题。
 
 上游模型用自己的数据训练、评测；普通电脑摄像头拍下的口型可能与训练画面不同。我们只用 18 句调整模型参数，6 句检查结果，样本也少。程序的采集、预处理和解码方式同样可能影响识别。现有测试还无法判断各环节分别造成了多少错误。[上游 README 的指标](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/README.md)来自它的评测集；你可以用自己新录的句子判断是否保留个人模型。
 
 ## 文档与许可
 
+- [文档目录](docs/README.md)：按用途查找需求、实验和发布记录。
 - [Evidence](docs/evidence.md)：项目决策、测试结果与未验证项。
-- [v0.4 研究记录](docs/research-mvp-v0.4.md)：模型选择与输入诊断。
-- [开源与试用准备](docs/open-source-readiness.md)：交付范围。
+- [v0.4 研究记录](docs/archived-experiments/research-mvp-v0.4.md)：模型选择与输入诊断。
 
 我们自写的代码和文档采用 [MIT 许可证](LICENSE)。默认使用的 [CNVSRC2025 VSR](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/README.md) 限定代码用于非商业比较或基准测试，使用前还请阅读它的 [LICENSE](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/LICENSE)。可选的 [CMLR 对比模型](https://github.com/mpc001/Visual_Speech_Recognition_for_Multiple_Languages#license) 也有自己的使用条件。本仓库不包含这些项目的代码或权重；如果要获取、使用或再分发，请先查看各自的条款。组件清单见 [THIRD_PARTY.md](THIRD_PARTY.md)。

@@ -8,7 +8,7 @@
 | --- | --- |
 | 产品 | Move Your Lips |
 | 版本 | MVP v0.4 Research |
-| 文档状态 | 实验前版本，待执行模型对比并回填结果 |
+| 文档状态 | 实验设计稿；完成情况与结果见 `docs/archived-experiments/research-mvp-v0.4.md` |
 | 版本类型 | 纯视觉唇语识别研究收尾版 |
 | 当前产品基线 | v0.3 已完成实时录制、历史记录、嘴部素材保存、回放和重新转写 |
 | v0.3 准确率基线 | 30 次测试，整句完全正确 1/30，CER 60.45% |
@@ -156,9 +156,9 @@ Lipflow 式的 24 句个人校准可以作为后续研究方向，但不作为 v
 
 ## 8. 交付物
 
-- `docs/prd-mvp-v0.4.md`：本版本范围和验收标准；
-- `docs/research-mvp-v0.4.md`：模型、实验过程、结果和最终结论；
-- `docs/v0.3-baseline-test.md`：v0.3 基线及 v0.4 原始测试表；
+- `docs/product/prd-mvp-v0.4.md`：本版本范围和验收标准；
+- `docs/archived-experiments/research-mvp-v0.4.md`：模型、实验过程、结果和最终结论；
+- `docs/archived-experiments/v0.3-baseline-test.md`：v0.3 基线及 v0.4 原始测试表；
 - 需要时在 `outputs/mvp/` 下保留实验输出和模型配置快照；
 - README 中的版本状态与最终结论保持一致。
 

@@ -56,7 +56,7 @@ def edit_distance(left: str, right: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phrases", type=Path, default=PROJECT_ROOT / "docs" / "unseen-sentence-check-v0.1.md")
+    parser.add_argument("--phrases", type=Path, default=PROJECT_ROOT / "docs" / "archived-experiments" / "unseen-sentence-check-v0.1.md")
     parser.add_argument("--history", type=Path, default=PROJECT_ROOT / "outputs" / "mvp" / "recognitions.jsonl")
     parser.add_argument("--recordings", type=Path, default=PROJECT_ROOT / "outputs" / "mvp" / "recordings")
     parser.add_argument("--vsr-root", type=Path, default=DEFAULT_VSR_ROOT)
