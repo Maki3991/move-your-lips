@@ -49,6 +49,7 @@ from lip_input_mvp import (
     paste_text,
 )
 from .history_presentation import decorate_history_items
+from .windows_taskbar import APP_ID, set_taskbar_icon
 
 
 MEDIA_FPS = 25.0
@@ -733,10 +734,12 @@ class QtHudApp(QObject):
             None,
         )
         self._setup_tray_icon(app_icon)
-        try:
-            self._set_windows_window_icon(ui_dir / "assets" / "myl-app-icon.ico")
-        except (AttributeError, OSError, TypeError, ValueError) as exc:
-            print(f"[mvp-hud] Windows taskbar icon could not be set: {exc}")
+        self._windows_icon_path = ui_dir / "assets" / "myl-app-icon.ico"
+        self._windows_icon_handles: tuple[int, int] | None = None
+        if self.home_window is not None:
+            # Register the icon before Explorer first sees the taskbar button.
+            self._refresh_home_window_icon()
+            self.home_window.visibleChanged.connect(self._on_home_window_visible_changed)
 
         self.modelsLoaded.connect(self._models_ready)
         self.modelFailed.connect(self._model_failed)
@@ -1129,7 +1132,7 @@ class QtHudApp(QObject):
         set_app_id = shell32.SetCurrentProcessExplicitAppUserModelID
         set_app_id.argtypes = [ctypes.c_wchar_p]
         set_app_id.restype = ctypes.c_long
-        result = set_app_id("MoveYourLips.Desktop")
+        result = set_app_id(APP_ID)
         if result != 0:
             print(f"[mvp-hud] Windows AppUserModelID could not be set: {result}")
 
@@ -1148,6 +1151,20 @@ class QtHudApp(QObject):
         icon.addPixmap(pixmap)
         return icon
 
+    def _on_home_window_visible_changed(self, visible: bool) -> None:
+        if visible:
+            # Qt can recreate the native handle when a hidden QML window is shown.
+            QTimer.singleShot(0, self._refresh_home_window_icon)
+
+    def _refresh_home_window_icon(self) -> None:
+        if self.home_window is None:
+            return
+        self.home_window.setIcon(self.app.windowIcon())
+        try:
+            self._set_windows_window_icon(self._windows_icon_path)
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            print(f"[mvp-hud] Windows taskbar icon could not be set: {exc}")
+
     def _set_windows_window_icon(self, icon_path: Path) -> None:
         if os.name != "nt" or self.home_window is None:
             return
@@ -1160,15 +1177,18 @@ class QtHudApp(QObject):
         send_message.argtypes = [ctypes.c_void_p, ctypes.c_uint,
                                  ctypes.c_size_t, ctypes.c_void_p]
         send_message.restype = ctypes.c_ssize_t
+        if self._windows_icon_handles is None:
+            small_icon = load_image(None, str(icon_path), 1, 16, 16, 0x10)
+            large_icon = load_image(None, str(icon_path), 1, 32, 32, 0x10)
+            if not small_icon or not large_icon:
+                print(f"[mvp-hud] Windows window icon could not be loaded: {icon_path}")
+                return
+            self._windows_icon_handles = (small_icon, large_icon)
+        small_icon, large_icon = self._windows_icon_handles
         hwnd = int(self.home_window.winId())
-        small_icon = load_image(None, str(icon_path), 1, 16, 16, 0x10)
-        large_icon = load_image(None, str(icon_path), 1, 32, 32, 0x10)
-        if not small_icon or not large_icon:
-            print(f"[mvp-hud] Windows window icon could not be loaded: {icon_path}")
-            return
         send_message(hwnd, 0x0080, 0, small_icon)
         send_message(hwnd, 0x0080, 1, large_icon)
-        self._windows_icon_handles = (small_icon, large_icon)
+        set_taskbar_icon(hwnd, icon_path)
 
     def _setup_tray_icon(self, icon: QIcon) -> None:
         if self.home_window is not None:
@@ -1370,6 +1390,7 @@ class QtHudApp(QObject):
             self.args.detect_interval,
         )
         self.mode = "ready"
+        self.bridge.set_hud("ready", "", "", visible=False)
         self._update_adaptation()
         if self.practice_phrases and self.practice_index >= 24:
             report_path = self.practice_path.parent / "adaptation-report.json" if self.practice_path else None
@@ -1377,8 +1398,6 @@ class QtHudApp(QObject):
                 QTimer.singleShot(0, self._train_adaptation)
         elif self.practice_phrases:
             self._show_practice_prompt()
-        else:
-            self.bridge.set_hud("ready", "", "", visible=False)
         self.bridge.set_home_visible(True)
 
     def _show_practice_prompt(self) -> None:
