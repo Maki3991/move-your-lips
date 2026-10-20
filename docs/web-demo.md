@@ -2,9 +2,11 @@
 
 对应需求：[PRD](product/prd-web-demo.md)；对应设计：[Figma 状态与组件](product/web-demo-figma.md)。
 
+**公网版本已于 2026-10-20 部署到 https://lips.maki3991.xyz**。连接公网中转请运行 `scripts/run_vps_worker.ps1`，详见 [VPS 部署说明](vps-deployment.md)；以下本地启动方式继续保留。
+
 ## 本次 Goal
 
-依据用户最新 Figma 文案，实现可以在电脑 localhost 测试、适配手机的网页，以及任务服务和笔记本 Worker；完成本地闭环、异常验证与运行说明。VPS 部署另行进行。
+依据用户最新 Figma 文案，实现可以在电脑 localhost 测试、适配手机的网页，以及任务服务和笔记本 Worker；完成本地闭环、异常验证与运行说明。最初 Goal 为本地实现，后续 VPS 部署单独记录。
 
 - 手机采用现有 Figma 流程，不恢复已隐藏的重复副标题。
 - 电脑宽度达到 800px 后，录制区与本机记录分为两列；复用同一套颜色、组件和状态，不需要先制作另一套电脑设计稿。
@@ -125,7 +127,7 @@ VPS 的结果清除是应用层删除；SQLite 留下不含文字/查询凭证�
 - 另用同一人脸视频作为浏览器虚拟摄像头输入，实际执行 MediaRecorder 录制、上传及模型识别；检查成功结果、刷新后本机保存、交接后 token 移除、复制到剪贴板，以及清空后刷新不再恢复。合成摄像头画面另验证了真实模型的「无嘴部」失败分支。
 - 测试截图在 Git 忽略的 `test-results/playwright/`；测试用视频与摄像头替身不进入产品逻辑。
 
-这不等于完成 PRD 全部上线验收：还需要 iPhone Safari/Android 真机 HTTPS 测试、目标 VPS 部署、实际手机网络传输，以及至少 10 条连续任务与多设备压力/稳定性验证。当前测试摄像头由 Chrome 提供的虚拟视频输入驱动，没有操控用户的真实摄像头。
+以上是本地阶段验证；已完成的公网部署与识别闭环见 [VPS 部署说明](vps-deployment.md)。PRD 全部上线验收还需要 iPhone Safari/Android 真机 HTTPS 测试、实际手机网络传输，以及至少 10 条连续任务与多设备压力/稳定性验证。当前测试摄像头由 Chrome 提供的虚拟视频输入驱动，没有操控用户的真实摄像头。
 
 重新跑后端验证：
 
@@ -133,12 +135,14 @@ VPS 的结果清除是应用层删除；SQLite 留下不含文字/查询凭证�
 .\.venv-web\Scripts\python.exe -m pytest tests/web_demo -q
 ```
 
-## 将来拆到 VPS
+## VPS 部署方式
+
+以下是部署原则；当前实例路径、配置与启动命令以 [VPS 部署说明](vps-deployment.md) 为准。
 
 1. 本地 `web/` 构建后，把 `web/dist`、`demo_server` 和 API 环境依赖安装到 VPS；无需模型或桌面 Qt 环境。
-2. 给服务设置 `MYL_WORKER_SECRET`（至少 32 字符随机值）、私有 `MYL_DATA_DIR`、`MYL_LOG_DIR`；不要提交或把密钥写进前端。API 仍绑定 `127.0.0.1:8000`，由 Nginx/Caddy 提供域名 HTTPS 与反向代理。
+2. 给服务设置 `MYL_WORKER_SECRET`（至少 32 字符随机值）、私有 `MYL_DATA_DIR`、`MYL_LOG_DIR`；不要提交或把密钥写进前端。当前 VPS 的 API 绑定 `127.0.0.1:8010`，由 Nginx 提供域名 HTTPS 与反向代理。
 3. 代理限制请求体 10 MB、上传超时至少 180 秒，转发真实来源 IP，限制可信代理；日志不记录认证头、请求体、结果或查询 token。接口凭证都在请求头，URL 只有随机任务 ID。
 4. 笔记本在模型 Python 中设置相同 `MYL_WORKER_SECRET` 后，运行 `python -m laptop_worker --url https://你的域名`。Worker 主动出站，不需要笔记本公网 IP，也不必与观众同一 Wi-Fi。
-5. 手机必须访问 HTTPS；普通局域网 HTTP IP 地址通常无法授权摄像头。本轮无 VPS/域名配置或发布操作，暂不提供公网演示地址。
+5. 手机必须访问 HTTPS；普通局域网 HTTP IP 地址通常无法授权摄像头。正式演示地址为 https://lips.maki3991.xyz。
 
 现有 CNVSRC 上游许可和权重条款仍按 `THIRD_PARTY.md` 与 PRD 中的边界处理；本轮本地实现不改变第三方授权。

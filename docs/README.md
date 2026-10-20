@@ -8,6 +8,7 @@
 | --- | --- |
 | [evidence.md](evidence.md) | 按日期保存项目决策、实验结论、证据位置和贡献边界。结果摘要在这里，逐条数据在实验文件里。 |
 | [project-structure.md](project-structure.md) | 项目目录职责、运行数据和测试产物的位置，以及 Git 提交边界。 |
+| [vps-deployment.md](vps-deployment.md) | 公网演示地址、笔记本 Worker 启动、VPS 服务配置、运维与部署验收。 |
 | [personal-adaptation-phrases-v0.1.json](personal-adaptation-phrases-v0.1.json) | 应用和训练脚本读取的 24 句原文及训练／留出划分。程序依赖此路径，暂留在 `docs/` 根目录。 |
 
 ## `product/`：问题与版本需求

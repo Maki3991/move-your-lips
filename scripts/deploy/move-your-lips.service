@@ -1,0 +1,29 @@
+[Unit]
+Description=Move Your Lips web relay (no recognition model)
+After=network.target
+
+[Service]
+Type=simple
+User=moveyourlips
+Group=moveyourlips
+WorkingDirectory=/opt/move-your-lips/current
+EnvironmentFile=/etc/move-your-lips/server.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/move-your-lips/venv/bin/python -m demo_server
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/move-your-lips /var/log/move-your-lips
+RestrictSUIDSGID=true
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=128
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target
