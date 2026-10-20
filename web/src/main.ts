@@ -12,12 +12,17 @@ type RecordItem = {
   code?: string;
   position?: number;
   expires?: number;
+  estimatedWaitSeconds?: number | null;
+  waitEstimateSource?: "initial" | "recent";
 };
 type Health = {
   state: "online" | "offline" | "preparing" | "full";
   queued: number;
   processing: number;
   uploading: number;
+  code?: string;
+  estimatedWaitSeconds?: number | null;
+  waitEstimateSource?: "initial" | "recent";
   limits: { maxBytes: number; maxSeconds: number; waiting: number };
 };
 type Stage =
@@ -59,6 +64,8 @@ const messages: Record<string, string> = {
   uploads_full: "上传名额已满，请稍后提交。",
   storage_full: "服务暂时无法接收视频，请稍后再试。",
   rate_limited: "操作过于频繁，请一分钟后再试。",
+  ip_rate_limited: "当前网络提交较多，请一分钟后再试。",
+  wait_too_long: "预计排队超过 3 分钟，请稍后提交。",
   no_mouth: "未检测到清晰嘴部。请正对镜头、改善光线后重录。",
   empty_output: "模型未识别出文字，请重新录制。",
   model_error: "本次识别失败，请重新录制。",
@@ -83,6 +90,15 @@ const messages: Record<string, string> = {
 };
 function friendly(code: string) {
   return messages[code] || "本次操作未完成，请稍后再试。";
+}
+function waitText(seconds: number, source?: "initial" | "recent") {
+  const time =
+    seconds < 15
+      ? "很快"
+      : seconds < 60
+        ? `约 ${Math.ceil(seconds / 15) * 15} 秒后`
+        : `约 ${Math.ceil(seconds / 60)} 分钟后`;
+  return `预计${time}开始识别${source === "initial" ? "（初始估算）" : ""}。`;
 }
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -283,7 +299,11 @@ function update() {
           "p",
           health?.state === "offline"
             ? "后端暂时离线，已提交任务会保留等待。"
-            : "结果会自动返回此页面。",
+            : health?.state === "preparing"
+              ? "模型准备中，暂无法估算等待时间。"
+              : active.state === "queued" && active.estimatedWaitSeconds != null
+                ? waitText(active.estimatedWaitSeconds, active.waitEstimateSource)
+                : "结果会自动返回此页面。",
         ),
       );
   }
@@ -304,7 +324,7 @@ function update() {
   ) {
     notice(
       health?.state === "full"
-        ? "服务名额已满。已录视频会保留，可稍后提交。"
+        ? `${friendly(health.code || "queue_full")}${stage === "review" ? "已录视频会保留在当前页面。" : ""}`
         : health?.state === "preparing"
           ? messages.preparing
           : health?.state === "offline"
@@ -312,7 +332,15 @@ function update() {
             : "正在连接识别服务…",
     );
     systemNotice = true;
-  } else if (online && systemNotice) {
+  } else if (
+    online &&
+    stage !== "waiting" && stage !== "submitting" && stage !== "recording" &&
+    health?.estimatedWaitSeconds != null && health.estimatedWaitSeconds > 0 &&
+    ($("notice").hidden || systemNotice)
+  ) {
+    notice(waitText(health.estimatedWaitSeconds, health.waitEstimateSource));
+    systemNotice = true;
+  } else if (systemNotice && (online || stage === "waiting")) {
     notice();
   }
 }
@@ -591,6 +619,8 @@ async function submit() {
         "queue_full",
         "storage_full",
         "rate_limited",
+        "ip_rate_limited",
+        "wait_too_long",
         "file_too_large",
       ].includes(code)
     ) {

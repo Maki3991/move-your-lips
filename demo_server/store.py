@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import hmac
+import math
 import secrets
 import shutil
 import sqlite3
@@ -30,6 +32,8 @@ class Limits:
     result_seconds: int = 3600
     heartbeat_seconds: int = 20
     disk_floor_bytes: int = 100_000_000
+    max_estimated_wait_seconds: int = 180
+    initial_process_seconds: int = 90
 
 
 def digest(value: str) -> str:
@@ -59,6 +63,8 @@ class Store:
             db.execute(
                 "CREATE INDEX IF NOT EXISTS tasks_state ON tasks(state, created)"
             )
+            db.execute("""CREATE TABLE IF NOT EXISTS processing_samples (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, seconds REAL NOT NULL)""")
             # A restarted service cannot trust partial bodies or previous model leases.
             for row in db.execute(
                 "SELECT id FROM tasks WHERE state IN ('uploading','processing')"
@@ -95,6 +101,8 @@ class Store:
 
     def _fail(self, db, task_id, code):
         now = self.clock()
+        if code == "processing_timeout":
+            self._sample(db, self.limits.process_seconds)
         db.execute(
             "UPDATE tasks SET state='failed',code=?,text='',receiving=0,expires=?,updated=? WHERE id=?",
             (code, now + self.limits.result_seconds, now, task_id),
@@ -130,6 +138,51 @@ class Store:
             and self.clock() - self.worker_seen < self.limits.heartbeat_seconds
         )
 
+    def _sample(self, db, seconds):
+        db.execute("INSERT INTO processing_samples(seconds) VALUES (?)", (seconds,))
+        db.execute("""DELETE FROM processing_samples WHERE sequence NOT IN
+            (SELECT sequence FROM processing_samples ORDER BY sequence DESC LIMIT 20)""")
+
+    def _estimate(self, db, before=None):
+        samples = sorted(
+            r[0] for r in db.execute("SELECT seconds FROM processing_samples")
+        )
+        duration = self.limits.initial_process_seconds
+        if samples:
+            observed = math.ceil(samples[math.ceil(len(samples) * 0.8) - 1] * 1.2)
+            duration = max(duration, observed) if len(samples) < 3 else observed
+        duration = max(15, min(self.limits.process_seconds, duration))
+        rows = db.execute(
+            "SELECT * FROM tasks WHERE state IN ('processing','queued','uploading')"
+        ).fetchall()
+        # Each slot's next availability. Overrunning jobs retain a 15s uncertainty floor.
+        slots = [
+            max(min(15, duration), duration - max(0, self.clock() - r["updated"]))
+            for r in rows
+            if r["state"] == "processing"
+        ]
+        slots.extend([0] * max(0, self.limits.processing - len(slots)))
+        heapq.heapify(slots)
+        pending = [
+            r
+            for r in rows
+            if r["state"] != "processing"
+            and (
+                before is None
+                or (r["created"], r["id"]) < (before["created"], before["id"])
+            )
+        ]
+        # Upload reservations conservatively count as work ahead, even before validation.
+        for _ in pending:
+            heapq.heapreplace(slots, slots[0] + duration)
+        return dict(
+            estimatedWaitSeconds=math.ceil(slots[0])
+            if self._online() and self.worker_ready
+            else None,
+            estimatedProcessSeconds=duration,
+            waitEstimateSource="recent" if len(samples) >= 3 else "initial",
+        )
+
     def status(self):
         self.cleanup()
         with self.db() as db:
@@ -145,13 +198,26 @@ class Store:
                 if not self.worker_ready
                 else "online"
             )
-            if state == "online" and (
-                pending >= self.limits.waiting
-                or counts.get("uploading", 0) >= self.limits.uploads
-            ):
+            estimate = self._estimate(db)
+            if state == "online" and estimate["estimatedWaitSeconds"] is None:
+                state = "offline"  # Heartbeat may expire during this status read.
+            code = ""
+            if state == "online":
+                if counts.get("uploading", 0) >= self.limits.uploads:
+                    code = "uploads_full"
+                elif pending >= self.limits.waiting:
+                    code = "queue_full"
+                elif (
+                    estimate["estimatedWaitSeconds"]
+                    > self.limits.max_estimated_wait_seconds
+                ):
+                    code = "wait_too_long"
+            if code:
                 state = "full"
             return dict(
                 state=state,
+                code=code,
+                **estimate,
                 queued=counts.get("queued", 0),
                 uploading=counts.get("uploading", 0),
                 processing=counts.get("processing", 0),
@@ -161,10 +227,11 @@ class Store:
                     processing=self.limits.processing,
                     maxBytes=self.limits.max_bytes,
                     maxSeconds=10,
+                    maxEstimatedWaitSeconds=self.limits.max_estimated_wait_seconds,
                 ),
             )
 
-    def reserve(self, attempt, token, size):
+    def reserve(self, attempt, token, size, admission=None):
         self.cleanup()
         with self.db() as db:
             previous = db.execute(
@@ -173,6 +240,8 @@ class Store:
             if previous:
                 self._auth(db, previous["id"], token)
                 return self._view(db, previous)
+            if admission:
+                admission()
             if not self._online():
                 raise Rejected("offline", 503)
             if not self.worker_ready:
@@ -184,6 +253,11 @@ class Store:
                 raise Rejected("uploads_full", 429)
             if sum(r["state"] != "processing" for r in rows) >= self.limits.waiting:
                 raise Rejected("queue_full", 429)
+            wait = self._estimate(db)["estimatedWaitSeconds"]
+            if wait is None:
+                raise Rejected("offline", 503)
+            if wait > self.limits.max_estimated_wait_seconds:
+                raise Rejected("wait_too_long", 429)
             active_ids = {r["id"] for r in rows}
             orphan_bytes = sum(
                 p.stat().st_size
@@ -232,6 +306,11 @@ class Store:
             code=row["code"],
             position=position,
             expires=row["expires"],
+            **(
+                self._estimate(db, before=row)
+                if row["state"] in ("uploading", "queued")
+                else {}
+            ),
         )
 
     def get(self, task_id, token):
@@ -338,6 +417,8 @@ class Store:
                 raise Rejected("stale_lease")
             now = self.clock()
             state = "failed" if code or not text.strip() else "succeeded"
+            if state == "succeeded":
+                self._sample(db, max(0, now - row["updated"]))
             db.execute(
                 "UPDATE tasks SET state=?,text=?,code=?,updated=?,expires=? WHERE id=?",
                 (

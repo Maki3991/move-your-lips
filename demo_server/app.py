@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
-import time
-from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .admission import BrowserAdmission
 from .store import Rejected, Store
 from .video import validate_video
 
@@ -54,7 +53,7 @@ def create_app(data_dir=None, secret=None, limits=None, validator=validate_video
         Path(data_dir or os.environ.get("MYL_DATA_DIR", ROOT / ".web-demo" / "server")),
         limits,
     )
-    rates = {}  # Bounded, per-process. Deploy exactly one API process.
+    admission = BrowserAdmission(worker_secret)
     validation_slots = asyncio.Semaphore(store.limits.uploads)
 
     @asynccontextmanager
@@ -74,13 +73,26 @@ def create_app(data_dir=None, secret=None, limits=None, validator=validate_video
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
+    app.state.admission = admission
 
     @app.exception_handler(Rejected)
     async def rejected(request, exc):
-        return JSONResponse({"code": exc.code}, status_code=exc.status)
+        return JSONResponse(
+            {"code": exc.code},
+            status_code=exc.status,
+            headers={"Retry-After": "60"}
+            if exc.code in {"rate_limited", "ip_rate_limited"}
+            else None,
+        )
 
     @app.middleware("http")
     async def headers(request, call_next):
+        browser, fresh = "", False
+        if request.url.path in {"/api/status", "/api/tasks"}:
+            browser, fresh = admission.identify(
+                request.cookies.get(admission.cookie, "")
+            )
+            request.state.browser = browser
         # API JSON bodies are tiny. Videos have their own streamed bound.
         if request.method == "POST":
             body = bytearray()
@@ -90,6 +102,16 @@ def create_app(data_dir=None, secret=None, limits=None, validator=validate_video
                 body.extend(chunk)
             request._body = bytes(body)
         response = await call_next(request)
+        if fresh:
+            response.set_cookie(
+                admission.cookie,
+                browser,
+                max_age=admission.lifetime,
+                httponly=True,
+                samesite="lax",
+                secure=request.url.scheme == "https",
+                path="/api",
+            )
         response.headers.update(
             {
                 "Cache-Control": "no-store",
@@ -110,30 +132,23 @@ def create_app(data_dir=None, secret=None, limits=None, validator=validate_video
         if not hmac.compare_digest(bearer(value), worker_secret):
             raise Rejected("not_found", 404)
 
-    def rate_limit(ip):
-        now = time.monotonic()
-        for key in list(rates):
-            if not rates[key] or rates[key][-1] < now - 60:
-                del rates[key]
-        if ip not in rates and len(rates) >= 1024:
-            raise Rejected("rate_limited", 429)
-        entries = rates.setdefault(ip, deque())
-        while entries and entries[0] < now - 60:
-            entries.popleft()
-        if len(entries) >= 6:
-            raise Rejected("rate_limited", 429)
-        entries.append(now)
-
     @app.get("/api/status")
     def status():
         return store.status()
 
     @app.post("/api/tasks")
     def reserve(body: Reservation, request: Request):
-        rate_limit(request.client.host if request.client else "unknown")
         if body.size > store.limits.max_bytes:
             raise Rejected("file_too_large", 413)
-        return store.reserve(body.attempt, body.token, body.size)
+        return store.reserve(
+            body.attempt,
+            body.token,
+            body.size,
+            admission=lambda: admission.check(
+                request.state.browser,
+                request.client.host if request.client else "unknown",
+            ),
+        )
 
     @app.get("/api/tasks/{task_id}")
     def get_task(task_id: str, authorization: str | None = Header(default=None)):

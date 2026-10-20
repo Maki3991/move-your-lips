@@ -64,6 +64,7 @@ def test_concurrent_upload_reservations_never_exceed_two(store):
 
 
 def test_queue_counts_uploads_and_processing_slot_is_atomic(store):
+    store.limits.max_estimated_wait_seconds = 3600  # Exercise the independent hard cap.
     queued = [enqueue(store) for _ in range(9)]
     reserve(store)
     with pytest.raises(Rejected) as error:
