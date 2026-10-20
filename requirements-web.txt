@@ -1,0 +1,6 @@
+# Lightweight API environment; keep separate from the existing model environment.
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+av>=14,<17
+httpx>=0.28,<1
+pytest>=8,<10

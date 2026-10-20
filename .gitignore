@@ -1,15 +1,26 @@
-.codex-temp
-test-results
-test-videos
-outputs/mvp
-scripts/__pycache__
-outputs
-scripts/ui/__pycache__/
+# Local development configuration and environments
+/.codex-temp/
+/local.settings.json
+/.venv/
+/.venv-web/
+/.cache/
 
 # Local research weights and the checked-out upstream inference repository
 /models/
 /third_party/Visual_Speech_Recognition_for_Multiple_Languages/
 /third_party/CNVSRC2025/
-/.venv/
-/local.settings.json
-/.cache/
+
+# Private runtime data, model experiments and test artifacts
+/.web-demo/
+/outputs/
+/test-results/
+/test-videos/
+
+# Generated frontend dependencies and build
+/web/node_modules/
+/web/dist/
+
+# Python bytecode and tool caches
+__pycache__/
+.pytest_cache/
+.ruff_cache/

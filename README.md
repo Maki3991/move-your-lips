@@ -4,6 +4,8 @@
 
 这是研究版。测试中常有整句话认错的情况，个人训练后也未必变准。我们还没有在其他人的电脑上验证安装流程。仓库不包含模型权重。
 
+新增的响应式网页 Demo 可在电脑浏览器本地测试，前端/API 与笔记本模型 Worker 分离。运行 `scripts/run_web_demo.ps1`，首次使用先运行 `scripts/setup_web_demo.ps1`；详见 [网页运行说明](docs/web-demo.md)。VPS 和手机真机验证尚未完成。
+
 ## 安装与启动
 
 安装前准备 Windows、摄像头、Git、Git LFS 和 Python 3.10。你还需要按 [CNVSRC2025 VSR 的说明](https://github.com/liu12366262626/CNVSRC2025/blob/main/VSR/README.md) 安装 PyTorch、`fairseq`、人脸检测和关键点模块。本项目的 `requirements-ui.txt` 负责界面等额外依赖；上游依赖需要你手动配置。
@@ -101,6 +103,7 @@ CER 是字符错误率。
 ## 文档与许可
 
 - [文档目录](docs/README.md)：按用途查找需求、实验和发布记录。
+- [项目目录说明](docs/project-structure.md)：源码、运行数据、测试产物和 Git 忽略规则。
 - [Evidence](docs/evidence.md)：项目决策、测试结果与未验证项。
 - [v0.4 研究记录](docs/archived-experiments/research-mvp-v0.4.md)：模型选择与输入诊断。
 
