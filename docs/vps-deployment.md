@@ -92,3 +92,11 @@ workbench exec --instance-id i-2zef1pphzxbat7xkfbxt --command 'tail -50 /var/log
 新增浏览器限流、宽松 IP 总量限制、实测耗时统计、3 分钟预计排队准入，以及页面预计开始识别的提示。无需更换笔记本 Worker 或模型。`processing_samples` 表在服务启动时自动创建，保留最多 20 个纯数值耗时；首次上线从 90 秒/条的初始估算开始。
 
 本地实现与验证完成后，更新包可解压至独立 release；切换 `current` 并重启服务后才在线上生效。发布前检查无上传中或处理中任务，保留旧 release 以便回滚。重启会短暂中断本站 API，并重置内存心跳和限流窗口；Worker 后续心跳会恢复在线状态。不得并行用新 `Store` 打开生产数据库进行验收，否则它会把旧进程的活动任务判定为重启遗留。
+
+本次已在用户确认后完成上线：
+
+- `current` 已从 `20261020-8845d90` 原子切换至 `20261020-e41a990`（代码提交 `e41a990`），并重启 `move-your-lips.service`；旧 release 保留用于回滚。切换前无上传、排队或处理中的任务。
+- 公网 HTTPS 首页、`/api/status` 均返回 200；页面 JS 为 `index-BQYEFVul.js`，引用的静态资源与新 release 一致。接口返回预计排队上限 180 秒、初始处理估算 90 秒。
+- 浏览器 Cookie 已核对 `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/api`；携带 Cookie 再次请求会保留同一浏览器身份。每浏览器 6 次/分钟、每 IP 60 次/分钟规则随新版生效，未对生产环境进行限流压测。
+- SQLite 已创建 `processing_samples`，当前无耗时样本、活动任务或中转视频。服务为 `active/running`，无异常自动重启；`study.maki3991.xyz` 仍返回 200。
+- 本次验收时笔记本 Worker 未连接，网站正确返回 Offline；在笔记本运行 `scripts/run_vps_worker.ps1` 后恢复模型服务。本次未进行多人真实模型压力测试。
