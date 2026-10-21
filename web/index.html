@@ -16,7 +16,10 @@
         <div class="brand">
           <img src="/assets/lips.svg" alt="" />Move Your Lips
         </div>
-        <span id="status" class="badge">连接中</span>
+        <div class="status-group">
+          <span id="status" class="badge">连接中</span>
+          <span id="offline-hint" class="offline-hint" hidden>后端模型已下线，暂不可用，请等待后端电脑启动模型。</span>
+        </div>
       </header>
       <main>
         <section class="capture" aria-labelledby="title">

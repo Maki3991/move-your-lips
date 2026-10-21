@@ -114,6 +114,26 @@ h2 {
   background: #edf0ef;
   color: var(--secondary);
 }
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.status-group .badge {
+  flex-shrink: 0;
+}
+.offline-hint {
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary);
+}
+.header.has-offline-hint {
+  height: auto;
+  min-height: 40px;
+  flex-wrap: wrap;
+}
 .badge.full {
   background: #fff0df;
   color: #8a581f;

@@ -212,6 +212,9 @@ function update() {
           }[health.state]
         : "连接中";
   badge.className = "badge " + (health?.state || "offline");
+  const showOfflineHint = badge.textContent === "Offline";
+  $("offline-hint").hidden = !showOfflineHint;
+  badge.closest("header")?.classList.toggle("has-offline-hint", showOfflineHint);
   $("camera-placeholder").hidden = !!stream || !!objectUrl;
   video.hidden = !stream && !objectUrl;
   video.controls = stage === "review";
