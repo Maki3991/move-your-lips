@@ -1,28 +1,18 @@
 # 项目目录说明
 
-桌面程序和网页 Demo 共用现有模型能力。按运行职责保留源码目录；依赖、个人数据和测试产物由 Git 忽略。
+桌面程序是主线；黑客松网页 Demo 已归档，仍复用桌面模型能力。依赖、个人数据和测试产物由 Git 忽略。
 
 ## 源码与文档
 
 ```text
 move-your-lips/
-├── web/                      网页源码和静态图标
-├── demo_server/              上传、队列、结果交接与清理；部署到 VPS
-├── laptop_worker/            笔记本模型 Worker；主动领取任务
-├── scripts/                  桌面程序、训练、实验及启动脚本
-│   ├── ui/                   桌面界面
-│   ├── diagnostics/          模型输入、人脸关键点诊断脚本
-│   └── deploy/               VPS systemd、Nginx 和首次部署配置
-├── tests/
-│   └── web_demo/             网页任务服务的自动化测试代码
-├── docs/                     需求、设计、实验记录与运行说明
-├── requirements-ui.txt       桌面界面依赖
-├── requirements-web.txt      API 依赖范围
-├── requirements-web.lock.txt 已验证的 API 与测试依赖版本快照
-└── requirements-server.lock.txt VPS 运行依赖版本快照
+├── archive/hackathon-web-demo/  已归档的网页、VPS 中转、Worker、测试及文档
+├── scripts/                     桌面程序、训练和实验脚本
+├── docs/                        项目需求、实验和证据
+└── requirements-ui.txt          桌面界面依赖
 ```
 
-以上文件需要提交 Git。`web/package-lock.json` 也应提交；`web/node_modules/` 和 `web/dist/` 是生成内容，不提交。
+以上文件需要提交 Git。归档中的 `web/package-lock.json` 也应提交；`web/node_modules/` 和 `web/dist/` 是生成内容，不提交。
 
 `.vscode/settings.json` 当前只有使用工作区相对路径的解释器配置，可以提交。个人绝对路径写入已忽略的 `local.settings.json`。
 
@@ -46,7 +36,9 @@ move-your-lips/
 
 `.web-demo/` 与 `outputs/` 分开：前者包含需自动清理的网页临时数据，后者可能包含需要长期保留的个人训练样本和模型。不要把它们当作同一种缓存统一删除。
 
-## 本次目录调整（2026-10-20）
+## 历史目录调整（2026-10-20）
+
+以下为当时的目录状态；2026-10-29 网页相关源码已移至 `archive/hackathon-web-demo/`。
 
 - 原 `output/playwright/` 已合并到 `test-results/playwright/`，后续浏览器截图沿用新位置。
 - 原 `tools/diagnose_face_keypoints.py` 和 `tools/diagnose_model_input.py` 已移入 `scripts/diagnostics/`，脚本内容保持原样。
@@ -54,4 +46,4 @@ move-your-lips/
 - `web/`、`demo_server/`、`laptop_worker/` 按运行和部署职责分别保留。
 - `.gitignore` 按环境、模型资产、运行数据、生成内容和缓存归组，移除了重复及旧目录规则。
 
-网页启动、资源限制和清理细节见 [网页 Demo 运行说明](web-demo.md)；公网部署和笔记本连接见 [VPS 部署说明](vps-deployment.md)。
+网页启动、资源限制和清理细节见 [网页 Demo 运行说明](../archive/hackathon-web-demo/docs/web-demo.md)；公网部署和笔记本连接见 [VPS 部署说明](../archive/hackathon-web-demo/docs/vps-deployment.md)。

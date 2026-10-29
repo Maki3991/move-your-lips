@@ -11,7 +11,7 @@ class Model:
         import torch
 
         torch.set_num_threads(threads)
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[3]
         sys.path.insert(0, str(root / "scripts"))
         from lip_input_mvp import CNVSRCRecognizer, RealtimeLandmarker
 

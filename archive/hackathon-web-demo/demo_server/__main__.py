@@ -5,7 +5,7 @@ import uvicorn
 if __name__ == "__main__":
     logs = Path(
         os.environ.get(
-            "MYL_LOG_DIR", Path(__file__).resolve().parents[1] / ".web-demo" / "logs"
+            "MYL_LOG_DIR", Path(__file__).resolve().parents[3] / ".web-demo" / "logs"
         )
     )
     logs.mkdir(parents=True, exist_ok=True)

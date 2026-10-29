@@ -17,6 +17,9 @@
 /test-videos/
 
 # Generated frontend dependencies and build
+/archive/hackathon-web-demo/web/node_modules/
+/archive/hackathon-web-demo/web/dist/
+# Pre-archive local build artifacts may still remain in their old location.
 /web/node_modules/
 /web/dist/
 

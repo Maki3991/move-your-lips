@@ -6,7 +6,7 @@ from pathlib import Path
 def event(message, *args):
     logger = logging.getLogger("myl.worker")
     if not logger.handlers:
-        directory = Path(__file__).resolve().parents[1] / ".web-demo" / "logs"
+        directory = Path(__file__).resolve().parents[3] / ".web-demo" / "logs"
         directory.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(
             directory / "worker.events.log",

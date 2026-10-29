@@ -1,5 +1,7 @@
 # VPS 网页与视频中转部署
 
+> **已归档（2026-10-29）**：黑客松演示已结束，原 VPS 服务与部署已删除。以下保留历史设计和验证记录；涉及公网运行状态、服务器路径及部署操作均为当时情况，不代表当前服务可用。归档入口见 [README](../README.md)。
+
 演示地址：**https://lips.maki3991.xyz**。部署日期：2026-10-20。
 
 ## 分工和启动
@@ -9,7 +11,7 @@ VPS 常驻运行网页、FastAPI、SQLite 和临时视频中转，不加载识�
 在笔记本的项目根目录运行：
 
 ```powershell
-.\scripts\run_vps_worker.ps1
+.\archive\hackathon-web-demo\scripts\run_vps_worker.ps1
 ```
 
 终端显示 `Model: online` 后，观众即可在网址中录制和提交。保持终端打开、电脑联网且不休眠。按 Ctrl+C 停止 Worker，VPS 网站继续运行，最后一次心跳约 20 秒后显示 Offline 并拒绝新任务。正在处理的任务不要中途关机；异常中断后会在处理超时后标记失败，不自动重跑模型。
@@ -18,7 +20,7 @@ VPS 常驻运行网页、FastAPI、SQLite 和临时视频中转，不加载识�
 
 私有连接文件为 `.web-demo/vps-worker.json`，包含 `url`、`workerSecret`。它已经被 Git 忽略；不要上传 GitHub、发给观众或写进网页代码。模型路径继续读取 `local.settings.json`。新电脑还需要原模型环境、代码与权重，只有这个 JSON 无法运行识别。
 
-## 当前服务器
+## 历史服务器配置（已删除）
 
 | 项目 | 值 |
 | --- | --- |
@@ -54,7 +56,7 @@ systemd 限制服务最多使用 512 MB 内存、约一个 CPU 核心；部署�
 
 完整数据生命周期和错误说明见 [web-demo.md](web-demo.md)。
 
-## 维护与复现
+## 历史维护与部署方式（未在归档后重新验证）
 
 使用本机 `alibabacloud-workbench-cli` 技能，常用只读检查：
 

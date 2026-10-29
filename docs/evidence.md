@@ -1,11 +1,15 @@
 # Evidence：决策、实验、AI 协作与结果
 
 **文档用途**：记录这个项目中可以被复查的事实、决策、实验结果和贡献边界。  
-**最后更新**：2026-10-20
+**最后更新**：2026-10-29
 
 **当前阶段**：MVP 实时交互原型已运行；CNVSRC2025 原模型与 CMLR + 中文语言模型复测均未达到可靠识别标准。24 句个人适配及原 10 句复测已完成；另录 10 句的同素材对照显示字级改善，但原模型和个人模型均为 0/10 整句正确。详见 `docs/archived-experiments/`。
 
 这不是流水账，也不是所有 AI 对话的备份。真正有价值的是：我做了什么判断、依据是什么、AI 做了什么、结果如何、下一步因此发生了什么变化。
+
+### 2026-10-29：网页演示停止与归档
+
+- 黑客松结束后，VPS 上的 Move Your Lips 服务、部署文件和专用站点配置已删除；源码和历史记录保留在 [现场演示归档](../archive/hackathon-web-demo/README.md)。以下 2026-10-20 记录反映当时状态。
 
 ### 2026-10-20：网页 Demo 部署到 VPS，笔记本提供模型识别
 
@@ -14,7 +18,7 @@
 - 我的决策或工作：用户确定手机录制、VPS 中转、笔记本识别、结果一对一返回和清空本机记录的流程，修改 Figma 文案并确认当前 UI；选择 `lips.maki3991.xyz` 并配置 DNS。
 - AI 协助：依照既有设计实现响应式前端、队列 API、Worker、清理与部署配置；通过 Workbench 部署 Nginx HTTPS 和独立 systemd 服务，执行自动化验证。
 - 结果：公网地址 https://lips.maki3991.xyz 可访问。Chrome 将既有测试视频作为虚拟摄像头输入，录制、上传，经笔记本真实识别并返回原网页；刷新恢复、结果 ACK、复制、清空与两端视频清理通过。上线参数为同时上传 2、上传预留加排队最多 10、同时处理 1；未连接笔记本时显示 Offline。
-- 证据位置：[部署记录](vps-deployment.md)、[实现说明](web-demo.md)、`test-results/playwright/vps-mobile-result.png`、`.web-demo/logs/worker.events.log`（后两者 Git 忽略）。
+- 证据位置：[部署记录](../archive/hackathon-web-demo/docs/vps-deployment.md)、[实现说明](../archive/hackathon-web-demo/docs/web-demo.md)、`test-results/playwright/vps-mobile-result.png`、`.web-demo/logs/worker.events.log`（后两者 Git 忽略）。
 - 结论：网页到 VPS 到笔记本模型的公网技术闭环已验证；没有因此获得识别准确率、其他用户可用性或市场需求的验证。
 - 未验证项：iPhone/Android 真实摄像头及移动网络、多设备容量、10 条连续任务与长时间稳定性。
 

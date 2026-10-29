@@ -1,8 +1,10 @@
 # 网页 Demo：本地运行与实现说明
 
+> **已归档（2026-10-29）**：黑客松演示已结束，原 VPS 服务与部署已删除。以下保留历史设计和验证记录；涉及公网运行状态、服务器路径及部署操作均为当时情况，不代表当前服务可用。归档入口见 [README](../README.md)。
+
 对应需求：[PRD](product/prd-web-demo.md)；对应设计：[Figma 状态与组件](product/web-demo-figma.md)。
 
-**公网版本已于 2026-10-20 部署到 https://lips.maki3991.xyz**。连接公网中转请运行 `scripts/run_vps_worker.ps1`，详见 [VPS 部署说明](vps-deployment.md)；以下本地启动方式继续保留。
+**公网版本曾于 2026-10-20 部署到 https://lips.maki3991.xyz，现已停止并删除**。历史公网配置见 [VPS 部署说明](vps-deployment.md)；以下本地启动方式继续保留。
 
 ## 本次 Goal
 
@@ -17,7 +19,7 @@
 目前已安装网页依赖和独立 API 环境。项目根目录的 PowerShell 中运行：
 
 ```powershell
-.\scripts\run_web_demo.ps1
+.\archive\hackathon-web-demo\scripts\run_web_demo.ps1
 ```
 
 打开 **http://127.0.0.1:8000**，等待右上角从「准备中」变为 **Online**。点击开启摄像头、开始录制、停止录制，预览后点击提交。使用摄像头的应是这个浏览器页面，原桌面程序可以关闭以避免设备占用。
@@ -27,8 +29,8 @@
 首次安装或重新安装依赖：
 
 ```powershell
-.\scripts\setup_web_demo.ps1
-.\scripts\run_web_demo.ps1
+.\archive\hackathon-web-demo\scripts\setup_web_demo.ps1
+.\archive\hackathon-web-demo\scripts\run_web_demo.ps1
 ```
 
 要求 Node.js 20.19+ / 22.12+、系统 Python 3.11+ 和已能运行桌面识别的模型环境。API 独立安装到 `.venv-web/`，不改模型环境。固定依赖快照见 `requirements-web.lock.txt`；重建同一依赖组合可用 API Python 安装该文件。
@@ -39,13 +41,13 @@ Worker 从 `local.settings.json` 读取 `python` 和 `vsrRoot`。权重沿用桌
 
 ```powershell
 # 只开网页/API，检查 Offline 状态
-.\scripts\run_web_demo.ps1 -NoWorker
+.\archive\hackathon-web-demo\scripts\run_web_demo.ps1 -NoWorker
 
 # 页面未改动时跳过构建
-.\scripts\run_web_demo.ps1 -NoBuild
+.\archive\hackathon-web-demo\scripts\run_web_demo.ps1 -NoBuild
 
 # 修改网页时：先启动 API，然后另开终端
-cd web
+cd archive/hackathon-web-demo/web
 npm.cmd run dev
 ```
 
@@ -143,12 +145,13 @@ VPS 的结果清除是应用层删除；SQLite 留下不含文字/查询凭证�
 重新跑后端验证：
 
 ```powershell
-.\.venv-web\Scripts\python.exe -m pytest tests/web_demo -q
+cd archive/hackathon-web-demo
+..\..\.venv-web\Scripts\python.exe -m pytest tests/web_demo -q
 ```
 
 ## VPS 部署方式
 
-以下是部署原则；当前实例路径、配置与启动命令以 [VPS 部署说明](vps-deployment.md) 为准。
+以下是历史部署原则，原实例上的项目配置已删除；归档后的部署模板未重新验证，历史详情见 [VPS 部署说明](vps-deployment.md)。
 
 1. 本地 `web/` 构建后，把 `web/dist`、`demo_server` 和 API 环境依赖安装到 VPS；无需模型或桌面 Qt 环境。
 2. 给服务设置 `MYL_WORKER_SECRET`（至少 32 字符随机值）、私有 `MYL_DATA_DIR`、`MYL_LOG_DIR`；不要提交或把密钥写进前端。当前 VPS 的 API 绑定 `127.0.0.1:8010`，由 Nginx 提供域名 HTTPS 与反向代理。

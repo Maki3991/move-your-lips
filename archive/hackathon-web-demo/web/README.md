@@ -2,7 +2,7 @@
 
 手机单列、电脑双列，共用同一套 Figma 组件风格。采用 Vite + TypeScript + 原生浏览器 MediaRecorder，不引入第二套 UI 框架。
 
-从项目根目录运行 `scripts/run_web_demo.ps1`，默认打开 `http://127.0.0.1:8000`。首次安装运行 `scripts/setup_web_demo.ps1`。
+从项目根目录运行 `archive/hackathon-web-demo/scripts/run_web_demo.ps1`，默认打开 `http://127.0.0.1:8000`。首次安装运行 `archive/hackathon-web-demo/scripts/setup_web_demo.ps1`。
 
 完整流程、参数、数据清理、API/Worker 分工与验证边界见 [运行说明](../docs/web-demo.md)。
 

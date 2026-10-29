@@ -4,7 +4,7 @@
 
 这是研究版。测试中常有整句话认错的情况，个人训练后也未必变准。我们还没有在其他人的电脑上验证安装流程。仓库不包含模型权重。
 
-响应式网页 Demo 已部署到 **https://lips.maki3991.xyz**，前端/API 与笔记本模型 Worker 分离。在已配置的笔记本上运行 `scripts/run_vps_worker.ps1` 即可提供识别，详见 [VPS 部署说明](docs/vps-deployment.md)。电脑本地测试仍运行 `scripts/run_web_demo.ps1`，首次使用先运行 `scripts/setup_web_demo.ps1`；详见 [网页运行说明](docs/web-demo.md)。手机真机验证尚未完成。
+黑客松期间开发的手机网页演示版已归档至 [archive/hackathon-web-demo](archive/hackathon-web-demo/README.md)。原 VPS 部署已于 2026-10-29 停止并删除；该演示版不属于当前桌面程序的启动流程。
 
 ## 安装与启动
 

@@ -8,7 +8,7 @@
 | --- | --- |
 | [evidence.md](evidence.md) | 按日期保存项目决策、实验结论、证据位置和贡献边界。结果摘要在这里，逐条数据在实验文件里。 |
 | [project-structure.md](project-structure.md) | 项目目录职责、运行数据和测试产物的位置，以及 Git 提交边界。 |
-| [vps-deployment.md](vps-deployment.md) | 公网演示地址、笔记本 Worker 启动、VPS 服务配置、运维与部署验收。 |
+| [vps-deployment.md](../archive/hackathon-web-demo/docs/vps-deployment.md) | 已归档：历史 VPS 配置、部署记录及验收边界；服务已停止并删除。 |
 | [personal-adaptation-phrases-v0.1.json](personal-adaptation-phrases-v0.1.json) | 应用和训练脚本读取的 24 句原文及训练／留出划分。程序依赖此路径，暂留在 `docs/` 根目录。 |
 
 ## `product/`：问题与版本需求
@@ -19,9 +19,9 @@
 | [mvp-prd.md](product/mvp-prd.md) | v0.2 和早期 v0.3 的需求草案；用来查当时的设想，不作为当前功能说明。 |
 | [prd-mvp-v0.3.md](product/prd-mvp-v0.3.md) | v0.3 的 Home、HUD、历史记录、快捷键和素材管理需求。 |
 | [prd-mvp-v0.4.md](product/prd-mvp-v0.4.md) | v0.4 纯视觉模型对比的范围、测试方法和验收规则。 |
-| [prd-web-demo.md](product/prd-web-demo.md) | 黑客松手机网页 Demo、VPS 与笔记本 Worker 的用户流程、容量、数据生命周期和待验证项。 |
-| [web-demo-figma.md](product/web-demo-figma.md) | 手机网页 Figma 设计、可点击原型入口、页面状态、组件与实现注意。 |
-| [网页 Demo 运行说明](web-demo.md) | 本轮实现目标、电脑本地启动、API/Worker 分工、资源参数、清理规则和已验证边界。 |
+| [prd-web-demo.md](../archive/hackathon-web-demo/docs/product/prd-web-demo.md) | 已归档：黑客松手机网页 Demo、VPS 与笔记本 Worker 的用户流程、容量、数据生命周期和待验证项。 |
+| [web-demo-figma.md](../archive/hackathon-web-demo/docs/product/web-demo-figma.md) | 已归档：手机网页 Figma 设计、可点击原型入口、页面状态、组件与实现注意。 |
+| [网页 Demo 运行说明](../archive/hackathon-web-demo/docs/web-demo.md) | 已归档：实现目标、电脑本地启动、API/Worker 分工、资源参数、清理规则和已验证边界。 |
 
 ## `archived-experiments/`：已完成的模型与测试记录
 

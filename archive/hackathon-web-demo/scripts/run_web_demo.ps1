@@ -5,14 +5,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$apiPython = Join-Path $project '.venv-web/Scripts/python.exe'
+$workspace = (Resolve-Path -LiteralPath (Join-Path $project '../..')).Path
+$apiPython = Join-Path $workspace '.venv-web/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $apiPython)) { throw 'Run scripts/setup_web_demo.ps1 first.' }
 if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
     throw "Port $Port is already in use. Stop the earlier demo or use -Port."
 }
-$settingsFile = Join-Path $project 'local.settings.json'
+$settingsFile = Join-Path $workspace 'local.settings.json'
 $settings = if (Test-Path -LiteralPath $settingsFile) { Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
-$modelPython = if ($settings -and $settings.python) { [string]$settings.python } else { Join-Path $project '.venv/Scripts/python.exe' }
+$modelPython = if ($settings -and $settings.python) { [string]$settings.python } else { Join-Path $workspace '.venv/Scripts/python.exe' }
 if (-not $NoWorker -and -not (Test-Path -LiteralPath $modelPython)) { throw 'Configure model Python in local.settings.json, or use -NoWorker to inspect Offline UI.' }
 Push-Location -LiteralPath $project
 $serverProcess = $null
@@ -28,8 +29,8 @@ try {
         } finally { Pop-Location }
     }
     if (-not (Test-Path -LiteralPath 'web/dist/index.html')) { throw 'Web build missing.' }
-    New-Item -ItemType Directory -Force '.web-demo/logs' | Out-Null
-    $configFile = Join-Path $project '.web-demo/local-config.json'
+    New-Item -ItemType Directory -Force (Join-Path $workspace '.web-demo/logs') | Out-Null
+    $configFile = Join-Path $workspace '.web-demo/local-config.json'
     if (-not (Test-Path -LiteralPath $configFile)) {
         $secretBytes = New-Object byte[] 32
         $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -40,7 +41,7 @@ try {
     $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
     $env:MYL_WORKER_SECRET = [string]$config.workerSecret
     $env:MYL_PORT = [string]$Port
-    $serverProcess = Start-Process -FilePath $apiPython -ArgumentList @('-m','demo_server') -WorkingDirectory $project -WindowStyle Hidden -PassThru -RedirectStandardOutput '.web-demo/logs/server.stdout.log' -RedirectStandardError '.web-demo/logs/server.stderr.log'
+    $serverProcess = Start-Process -FilePath $apiPython -ArgumentList @('-m','demo_server') -WorkingDirectory $project -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $workspace '.web-demo/logs/server.stdout.log') -RedirectStandardError (Join-Path $workspace '.web-demo/logs/server.stderr.log')
     $url = "http://127.0.0.1:$Port"
     $available = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -49,7 +50,7 @@ try {
     }
     if (-not $available) { throw 'API startup timed out.' }
     if (-not $NoWorker) {
-        $workerProcess = Start-Process -FilePath $modelPython -ArgumentList @('-u','-m','laptop_worker','--url',$url) -WorkingDirectory $project -WindowStyle Hidden -PassThru -RedirectStandardOutput '.web-demo/logs/worker.stdout.log' -RedirectStandardError '.web-demo/logs/worker.stderr.log'
+        $workerProcess = Start-Process -FilePath $modelPython -ArgumentList @('-u','-m','laptop_worker','--url',$url) -WorkingDirectory $project -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $workspace '.web-demo/logs/worker.stdout.log') -RedirectStandardError (Join-Path $workspace '.web-demo/logs/worker.stderr.log')
     }
     Write-Host "Web demo: $url"
     Write-Host 'Keep this terminal open. Ctrl+C stops API and Worker. Logs: .web-demo/logs/'

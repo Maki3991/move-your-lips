@@ -50,7 +50,7 @@ def create_app(data_dir=None, secret=None, limits=None, validator=validate_video
             "Set MYL_WORKER_SECRET to a random value of at least 32 characters."
         )
     store = Store(
-        Path(data_dir or os.environ.get("MYL_DATA_DIR", ROOT / ".web-demo" / "server")),
+        Path(data_dir or os.environ.get("MYL_DATA_DIR", ROOT.parents[1] / ".web-demo" / "server")),
         limits,
     )
     admission = BrowserAdmission(worker_secret)
